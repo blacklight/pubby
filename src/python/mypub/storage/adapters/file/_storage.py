@@ -21,7 +21,6 @@ Thread-safe via an RLock per resource path.
 import hashlib
 import json
 import logging
-import os
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -253,7 +252,7 @@ class FileActivityPubStorage(ActivityPubStorage):
 
         fetched_at_str = data.get("fetched_at")
         if fetched_at_str:
-            fetched_at = datetime.fromisoformat(fetched_at_str)
+            fetched_at = datetime.fromisoformat(fetched_at_str.replace("Z", "+00:00"))
             if fetched_at.tzinfo is None:
                 fetched_at = fetched_at.replace(tzinfo=timezone.utc)
             age = (datetime.now(timezone.utc) - fetched_at).total_seconds()

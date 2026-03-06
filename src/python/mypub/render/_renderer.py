@@ -28,7 +28,9 @@ class TemplateUtils:
         if isinstance(d, datetime.datetime):
             return d.strftime("%b %d, %Y")
         if isinstance(d, str):
-            return datetime.datetime.fromisoformat(d).strftime("%b %d, %Y")
+            return datetime.datetime.fromisoformat(d.replace("Z", "+00:00")).strftime(
+                "%b %d, %Y"
+            )
         return str(d)
 
     @staticmethod
@@ -38,7 +40,7 @@ class TemplateUtils:
         if isinstance(dt, datetime.datetime):
             return dt.strftime("%b %d, %Y at %H:%M")
         if isinstance(dt, str):
-            return datetime.datetime.fromisoformat(dt).strftime(
+            return datetime.datetime.fromisoformat(dt.replace("Z", "+00:00")).strftime(
                 "%b %d, %Y at %H:%M"
             )
         return str(dt)
@@ -81,9 +83,7 @@ class InteractionsRenderer:
     using Jinja2 templates.
     """
 
-    def _get_template(
-        self, template: TemplateLike | None, *, default: str
-    ) -> Template:
+    def _get_template(self, template: TemplateLike | None, *, default: str) -> Template:
         env = Environment(
             loader=PackageLoader("mypub", "templates"),
             autoescape=select_autoescape(enabled_extensions=("html", "xml")),
@@ -96,9 +96,7 @@ class InteractionsRenderer:
             isinstance(template, str) and os.path.isfile(template)
         ):
             template_path = Path(template)
-            template_obj = env.from_string(
-                template_path.read_text(encoding="utf-8")
-            )
+            template_obj = env.from_string(template_path.read_text(encoding="utf-8"))
         elif isinstance(template, str):
             template_obj = env.from_string(template)
         elif isinstance(template, Template):
@@ -113,9 +111,7 @@ class InteractionsRenderer:
         self, template: TemplateLike | None, *, default: str, **kwargs
     ) -> Markup:
         template_obj = self._get_template(template, default=default)
-        return Markup(
-            template_obj.render(**kwargs, **TemplateUtils.to_dict())
-        )
+        return Markup(template_obj.render(**kwargs, **TemplateUtils.to_dict()))
 
     def render_interaction(
         self,
