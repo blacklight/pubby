@@ -1,0 +1,88 @@
+<style>
+.ap-interactions, .ap-interaction {
+  --color-bg: var(--color-bg-interactions, #f8f8f8);
+  --color-fg: var(--color-fg-interactions, #3a3a3a);
+  --color-fg-secondary: var(--color-fg-interactions-secondary, #555);
+  --color-fg-tertiary: var(--color-fg-interactions-tertiary, #999);
+  --color-border: var(--color-interactions-border, #ccc);
+}
+
+@media (prefers-color-scheme: dark) {
+  .ap-interactions, .ap-interaction {
+    --color-bg: var(--color-bg-interactions, #202020);
+    --color-fg: var(--color-fg-interactions, #ccc);
+    --color-fg-secondary: var(--color-fg-interactions-secondary, #aaa);
+    --color-fg-tertiary: var(--color-fg-interactions-tertiary, #666);
+    --color-border: var(--color-interactions-border, #666);
+  }
+}
+
+.ap-interactions {
+  margin-top: 1.5em;
+  border-top: 3px solid var(--color-border);
+}
+
+.ap-interaction {
+  margin-bottom: 0.5em;
+  padding: 1em;
+  border: 1px solid var(--color-border);
+  border-radius: 0.6em;
+  background: var(--color-bg);
+  color: var(--color-fg);
+}
+
+.ap-interaction .ap-interaction-author {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+}
+
+.ap-interaction .ap-interaction-author-photo {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  object-fit: cover;
+  border: 1px solid var(--color-border);
+}
+
+.ap-interaction .ap-interaction-author-name {
+  font-size: 0.85em;
+  color: var(--color-fg-secondary);
+}
+
+.ap-interaction .ap-interaction-body {
+  margin-top: 0.5em;
+}
+
+.ap-interaction .ap-interaction-content {
+  line-height: 1.45em;
+}
+
+.ap-interaction .ap-interaction-label {
+  color: var(--color-fg-tertiary);
+  font-size: 0.9em;
+}
+
+.ap-interaction .ap-interaction-date {
+  font-size: 0.6em;
+  color: var(--color-fg-tertiary);
+  margin-top: 0.5em;
+}
+
+.ap-interactions h2 {
+  color: var(--color-fg-secondary);
+  margin-top: 0.5em;
+  margin-bottom: 1em;
+  padding-top: 0.5em;
+  font-weight: normal;
+}
+</style>
+
+{% if interactions is defined and interactions|length > 0 %}
+<div class="ap-interactions">
+  <h2>🌐 &nbsp; {{ interactions | length }} Fediverse Interaction{% if interactions | length != 1 %}s{% endif %}</h2>
+  {% for html in interactions %}
+    {{ html }}
+  {% endfor %}
+</div>
+{% endif %}

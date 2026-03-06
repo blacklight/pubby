@@ -1,0 +1,40 @@
+<div class="ap-interaction ap-interaction-{{ interaction.interaction_type.value }}">
+  {% set safe_author_url = safe_url(interaction.author_url) %}
+  {% set safe_author_photo = safe_url(interaction.author_photo) %}
+
+  <div class="ap-interaction-author">
+    {% if safe_author_photo %}
+      <img class="ap-interaction-author-photo" src="{{ safe_author_photo }}" alt="" loading="lazy" />
+    {% endif %}
+
+    {% if interaction.author_name or interaction.author_url %}
+      {% if safe_author_url %}
+        <a class="ap-interaction-author-name" href="{{ safe_author_url }}">{{ interaction.author_name or hostname(safe_author_url) }}</a>
+      {% else %}
+        <span class="ap-interaction-author-name">{{ interaction.author_name }}</span>
+      {% endif %}
+    {% endif %}
+  </div>
+
+  <div class="ap-interaction-body">
+    {% if interaction.interaction_type.value == "reply" %}
+      {% if interaction.content %}
+        <div class="ap-interaction-content">{{ interaction.content }}</div>
+      {% endif %}
+    {% elif interaction.interaction_type.value == "like" %}
+      <span class="ap-interaction-label">⭐ liked this</span>
+    {% elif interaction.interaction_type.value == "boost" %}
+      <span class="ap-interaction-label">🔁 boosted this</span>
+    {% else %}
+      <span class="ap-interaction-label">mentioned this</span>
+    {% endif %}
+  </div>
+
+  {% if interaction.published %}
+    <div class="ap-interaction-date">
+      <time datetime="{{ interaction.published.isoformat() if interaction.published else '' }}">
+        {{ format_datetime(interaction.published) }}
+      </time>
+    </div>
+  {% endif %}
+</div>

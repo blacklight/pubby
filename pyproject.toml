@@ -1,0 +1,65 @@
+[project]
+name = "mypub"
+version = "0.0.1"
+description = "A general-purpose library to add ActivityPub federation support to your website"
+license = "AGPL-3.0-or-later"
+dependencies = [
+  "cryptography>=41.0",
+  "jinja2",
+  "requests",
+]
+authors = [
+  {name = "Fabio Manganiello", email = "fabio@manganiello.tech"},
+]
+
+classifiers=[
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Development Status :: 3 - Alpha",
+]
+
+readme = "README.md"
+requires-python = '>= 3.10'
+keywords = ["activitypub", "fediverse", "federation", "mastodon"]
+
+[project.optional-dependencies]
+db = ["sqlalchemy"]
+fastapi = ["fastapi", "uvicorn"]
+flask = ["flask"]
+tornado = ["tornado"]
+test = ["pytest", "pytest-cov", "sqlalchemy", "flask"]
+dev = ["pre-commit", "black", "flake8"]
+
+[project.urls]
+homepage = "https://git.fabiomanganiello.com/mypub"
+github = "https://github.com/blacklight/mypub"
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src/python"}
+
+[tool.setuptools.package-data]
+mypub = ["templates/*.html"]
+
+[tool.setuptools.packages.find]
+where = ["src/python"]
+include = ["mypub*"]
+
+[tool.bumpversion]
+current_version = "0.0.1"
+commit = true
+tag = true
+
+[[tool.bumpversion.files]]
+filename = "src/python/mypub/__init__.py"
+
+[[tool.bumpversion.files]]
+filename = "CHANGELOG.md"
+search = "Unreleased"
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: marks integration tests",
+]

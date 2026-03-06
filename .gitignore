@@ -1,0 +1,12 @@
+*.vim
+__pycache__
+*.egg-info
+*.lock
+/dist
+.idea
+.pytest_cache
+.benchmarks
+.venv
+.coverage
+coverage.xml
+docs/_build
