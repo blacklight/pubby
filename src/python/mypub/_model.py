@@ -116,7 +116,8 @@ def _parse_dt(value: object) -> datetime | None:
     if isinstance(value, datetime):
         dt = value
     elif isinstance(value, str) and value.strip():
-        dt = datetime.fromisoformat(value)
+        # Python <3.11 doesn't accept trailing 'Z' in fromisoformat
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
     elif isinstance(value, (int, float)):
         dt = datetime.fromtimestamp(value, tz=timezone.utc)
     else:
@@ -215,9 +216,7 @@ class Actor:
             following=data.get("following", ""),
             icon=icon,
             public_key_pem=public_key_pem,
-            manually_approves_followers=data.get(
-                "manuallyApprovesFollowers", False
-            ),
+            manually_approves_followers=data.get("manuallyApprovesFollowers", False),
             discoverable=data.get("discoverable", True),
             url=data.get("url", ""),
             endpoints=data.get("endpoints", {}),
@@ -298,8 +297,16 @@ class Object:
             sensitive=data.get("sensitive", False),
             tag=data.get("tag", []),
             attachment=data.get("attachment", []),
-            to=data.get("to", []) if isinstance(data.get("to"), list) else [data["to"]] if data.get("to") else [],
-            cc=data.get("cc", []) if isinstance(data.get("cc"), list) else [data["cc"]] if data.get("cc") else [],
+            to=(
+                data.get("to", [])
+                if isinstance(data.get("to"), list)
+                else [data["to"]] if data.get("to") else []
+            ),
+            cc=(
+                data.get("cc", [])
+                if isinstance(data.get("cc"), list)
+                else [data["cc"]] if data.get("cc") else []
+            ),
         )
 
 
@@ -392,9 +399,7 @@ class Interaction:
         return _normalize(asdict(self))
 
     def __hash__(self):
-        return hash(
-            (self.source_actor_id, self.target_resource, self.interaction_type)
-        )
+        return hash((self.source_actor_id, self.target_resource, self.interaction_type))
 
     @classmethod
     def build(cls, data: dict) -> "Interaction":
