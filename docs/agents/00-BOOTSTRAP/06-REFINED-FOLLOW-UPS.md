@@ -30,7 +30,7 @@ Do not modify any code yet.
 
 After each cycle of plan+follow-up, stop and wait for my input.
 
-If I answer yes it means that you can proceed with the implementation agreed in the plan.
+If I answer yes it means that you can proceed with the implementation agreed in the plan. Also make sure that test coverage remains very high.
 
 If I answer no it means that you should re-analyze the plan files, address my comments (marked by <!-- ... --> sections) and regenerate the plan until I answer yes.
 
