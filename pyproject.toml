@@ -26,7 +26,7 @@ db = ["sqlalchemy"]
 fastapi = ["fastapi", "uvicorn"]
 flask = ["flask"]
 tornado = ["tornado"]
-test = ["pytest", "pytest-cov", "sqlalchemy", "flask"]
+test = ["pytest", "pytest-cov", "sqlalchemy", "flask", "fastapi", "httpx", "tornado"]
 dev = ["pre-commit", "black", "flake8"]
 
 [project.urls]

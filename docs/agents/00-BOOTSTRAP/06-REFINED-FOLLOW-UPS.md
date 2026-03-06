@@ -4,7 +4,7 @@ What follows is a list of the follow-up tasks, in order of priority.
 
 Please use `/home/blacklight/git_tree/pubby/docs/agents/00-BOOTSTRAP/04-PLAN.md` and `/home/blacklight/git_tree/pubby/docs/agents/00-BOOTSTRAP/05-FOLLOW-UP.md` for more in-depth context.
 
-1. [ ] **Synchronous/blocking delivery**: Handle requests concurrently through a `ThreadPoolExecutor`. 
+1. [x] **Synchronous/blocking delivery**: Handle requests concurrently through a `ThreadPoolExecutor`. 
 2. [ ] Add **FastAPI** and **Tornado** adapters
 3. [ ] **Madblog** integration
     - [ ] Wire to the existing Flask implementation
