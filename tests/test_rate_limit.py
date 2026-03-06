@@ -6,8 +6,8 @@ import time
 
 import pytest
 
-from mypub._exceptions import RateLimitError
-from mypub._rate_limit import RateLimiter
+from pubby._exceptions import RateLimitError
+from pubby._rate_limit import RateLimiter
 
 
 class TestRateLimiter:

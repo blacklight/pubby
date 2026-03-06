@@ -4,7 +4,7 @@ Tests for RSA key generation, loading, and export.
 
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-from mypub.crypto._keys import (
+from pubby.crypto._keys import (
     export_private_key_pem,
     export_public_key_pem,
     generate_rsa_keypair,

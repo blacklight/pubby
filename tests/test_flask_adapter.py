@@ -7,11 +7,11 @@ import json
 import pytest
 from flask import Flask
 
-from mypub._rate_limit import RateLimiter
-from mypub.crypto._keys import generate_rsa_keypair
-from mypub.handlers import ActivityPubHandler
-from mypub.server.adapters.flask import bind_activitypub
-from mypub.storage.adapters.db import init_db_storage
+from pubby._rate_limit import RateLimiter
+from pubby.crypto._keys import generate_rsa_keypair
+from pubby.handlers import ActivityPubHandler
+from pubby.server.adapters.flask import bind_activitypub
+from pubby.storage.adapters.db import init_db_storage
 
 
 @pytest.fixture

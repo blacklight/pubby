@@ -85,7 +85,7 @@ class InteractionsRenderer:
 
     def _get_template(self, template: TemplateLike | None, *, default: str) -> Template:
         env = Environment(
-            loader=PackageLoader("mypub", "templates"),
+            loader=PackageLoader("pubby", "templates"),
             autoescape=select_autoescape(enabled_extensions=("html", "xml")),
         )
 

@@ -4,9 +4,9 @@ Tests for HTTP signature creation and verification.
 
 import pytest
 
-from mypub._exceptions import SignatureVerificationError
-from mypub.crypto._keys import generate_rsa_keypair
-from mypub.crypto._signatures import (
+from pubby._exceptions import SignatureVerificationError
+from pubby.crypto._keys import generate_rsa_keypair
+from pubby.crypto._signatures import (
     _build_digest,
     _build_signing_string,
     _parse_signature_header,

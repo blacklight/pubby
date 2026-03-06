@@ -7,8 +7,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mypub._model import Follower, Object
-from mypub.handlers._outbox import OutboxProcessor, AS_PUBLIC
+from pubby._model import Follower, Object
+from pubby.handlers._outbox import OutboxProcessor, AS_PUBLIC
 
 
 @pytest.fixture
@@ -104,7 +104,7 @@ class TestCollectInboxes:
 
 
 class TestDelivery:
-    @patch("mypub.handlers._outbox.requests")
+    @patch("pubby.handlers._outbox.requests")
     def test_publish_delivers_to_followers(
         self, mock_requests, outbox_processor, mock_storage
     ):
@@ -140,7 +140,7 @@ class TestDelivery:
             call_kwargs
         )
 
-    @patch("mypub.handlers._outbox.requests")
+    @patch("pubby.handlers._outbox.requests")
     def test_delivery_retries_on_5xx(
         self, mock_requests, outbox_processor, mock_storage
     ):
@@ -174,7 +174,7 @@ class TestDelivery:
         # Should have retried
         assert mock_requests.post.call_count == 2
 
-    @patch("mypub.handlers._outbox.requests")
+    @patch("pubby.handlers._outbox.requests")
     def test_delivery_gives_up_after_max_retries(
         self, mock_requests, outbox_processor, mock_storage
     ):

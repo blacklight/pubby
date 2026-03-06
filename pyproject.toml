@@ -1,5 +1,5 @@
 [project]
-name = "mypub"
+name = "pubby"
 version = "0.0.1"
 description = "A general-purpose library to add ActivityPub federation support to your website"
 license = "AGPL-3.0-or-later"
@@ -30,8 +30,8 @@ test = ["pytest", "pytest-cov", "sqlalchemy", "flask"]
 dev = ["pre-commit", "black", "flake8"]
 
 [project.urls]
-homepage = "https://git.fabiomanganiello.com/mypub"
-github = "https://github.com/blacklight/mypub"
+homepage = "https://git.fabiomanganiello.com/pubby"
+github = "https://github.com/blacklight/pubby"
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
@@ -41,11 +41,11 @@ build-backend = "setuptools.build_meta"
 package-dir = {"" = "src/python"}
 
 [tool.setuptools.package-data]
-mypub = ["templates/*.html"]
+pubby = ["templates/*.html"]
 
 [tool.setuptools.packages.find]
 where = ["src/python"]
-include = ["mypub*"]
+include = ["pubby*"]
 
 [tool.bumpversion]
 current_version = "0.0.1"
@@ -53,7 +53,7 @@ commit = true
 tag = true
 
 [[tool.bumpversion.files]]
-filename = "src/python/mypub/__init__.py"
+filename = "src/python/pubby/__init__.py"
 
 [[tool.bumpversion.files]]
 filename = "CHANGELOG.md"

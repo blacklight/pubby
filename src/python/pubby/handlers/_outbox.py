@@ -49,7 +49,7 @@ class OutboxProcessor:
         *,
         max_retries: int = 3,
         retry_base_delay: float = 10.0,
-        user_agent: str = "mypub/0.0.1",
+        user_agent: str = "pubby/0.0.1",
         http_timeout: float = 15.0,
     ):
         self.storage = storage

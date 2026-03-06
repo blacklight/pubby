@@ -6,10 +6,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mypub._model import (
+from pubby._model import (
     InteractionType,
 )
-from mypub.handlers._inbox import InboxProcessor
+from pubby.handlers._inbox import InboxProcessor
 
 
 @pytest.fixture
@@ -52,7 +52,7 @@ def _remote_actor_data(actor_id="https://remote.example.com/users/alice"):
 
 
 class TestHandleFollow:
-    @patch("mypub.handlers._inbox.requests")
+    @patch("pubby.handlers._inbox.requests")
     def test_follow_stores_follower_and_sends_accept(
         self, mock_requests, inbox_processor, mock_storage
     ):
@@ -111,7 +111,7 @@ class TestHandleUndoFollow:
 
 
 class TestHandleCreate:
-    @patch("mypub.handlers._inbox.requests")
+    @patch("pubby.handlers._inbox.requests")
     def test_create_note_stores_reply(
         self, mock_requests, inbox_processor, mock_storage
     ):
@@ -148,7 +148,7 @@ class TestHandleCreate:
         assert interaction.content == "<p>Great post!</p>"
         assert interaction.author_name == "Alice"
 
-    @patch("mypub.handlers._inbox.requests")
+    @patch("pubby.handlers._inbox.requests")
     def test_create_without_reply_to_ignored(
         self, mock_requests, inbox_processor, mock_storage
     ):
@@ -168,7 +168,7 @@ class TestHandleCreate:
 
 
 class TestHandleLike:
-    @patch("mypub.handlers._inbox.requests")
+    @patch("pubby.handlers._inbox.requests")
     def test_like_stores_interaction(
         self, mock_requests, inbox_processor, mock_storage
     ):
@@ -197,7 +197,7 @@ class TestHandleLike:
 
 
 class TestHandleAnnounce:
-    @patch("mypub.handlers._inbox.requests")
+    @patch("pubby.handlers._inbox.requests")
     def test_announce_stores_boost(self, mock_requests, inbox_processor, mock_storage):
         actor_id = "https://remote.example.com/users/alice"
         actor_data = _remote_actor_data(actor_id)
@@ -242,7 +242,7 @@ class TestHandleDelete:
 
 
 class TestHandleUpdate:
-    @patch("mypub.handlers._inbox.requests")
+    @patch("pubby.handlers._inbox.requests")
     def test_update_note_updates_interaction(
         self, mock_requests, inbox_processor, mock_storage
     ):
@@ -290,7 +290,7 @@ class TestUnknownActivity:
 
 
 class TestInteractionCallback:
-    @patch("mypub.handlers._inbox.requests")
+    @patch("pubby.handlers._inbox.requests")
     def test_callback_called_on_like(self, mock_requests, mock_storage, private_key):
         callback = MagicMock()
         processor = InboxProcessor(

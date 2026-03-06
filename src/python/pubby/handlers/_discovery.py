@@ -55,7 +55,7 @@ def build_nodeinfo_discovery(base_url: str) -> dict[str, Any]:
 
 
 def build_nodeinfo_document(
-    software_name: str = "mypub",
+    software_name: str = "pubby",
     software_version: str = "0.0.1",
     total_users: int = 1,
     total_posts: int = 0,

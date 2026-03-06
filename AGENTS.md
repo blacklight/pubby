@@ -1,4 +1,4 @@
-# AGENTS.md — Mypub
+# AGENTS.md — Pubby
 
 ## Description
 

@@ -61,10 +61,10 @@ class ActivityPubHandler:
         private_key_path: str | Path | None = None,
         on_interaction_received: Callable[[Interaction], None] | None = None,
         webfinger_domain: str | None = None,
-        user_agent: str = "mypub/0.0.1",
+        user_agent: str = "pubby/0.0.1",
         http_timeout: float = 15.0,
         max_retries: int = 3,
-        software_name: str = "mypub",
+        software_name: str = "pubby",
         software_version: str = "0.0.1",
     ):
         self.storage = storage

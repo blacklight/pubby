@@ -1,6 +1,6 @@
 Read /home/blacklight/git_tree/madblog/docs/research/ActivityPub/02-RESEARCH.md again and use it as an input for the next step.
 
-Create an empty directory ~/git_tree/mypub. Use it as your context root from now on and create an empty repo in it (`git init`).
+Create an empty directory ~/git_tree/pubby. Use it as your context root from now on and create an empty repo in it (`git init`).
 
 Initialize the repo as a Python library to add ActivityPub support to an existing Web app, use ~/git_tree/webmentions as a template.
 
@@ -40,8 +40,8 @@ Responding to the _Open Questions_ part of 02-RESEARCH.md:
 
 ## Output
 
-Prepare a more detailed plan of the required components, dependencies and architecture considerations and write it to ~/git_tree/mypub/docs/agents/04-PLAN.md.
+Prepare a more detailed plan of the required components, dependencies and architecture considerations and write it to ~/git_tree/pubby/docs/agents/04-PLAN.md.
 
-Focus only on the Mypub library part for now and defer all the Madblog implementation to the follow-ups.
+Focus only on the Pubby library part for now and defer all the Madblog implementation to the follow-ups.
 
-Write down any follow-up tasks to ~/git_tree/mypub/docs/agents/05-FOLLOW-UP.md.
+Write down any follow-up tasks to ~/git_tree/pubby/docs/agents/05-FOLLOW-UP.md.

@@ -3,7 +3,7 @@
 ## 1. Component Breakdown
 
 ```
-mypub/
+pubby/
 ├── __init__.py              # Public API re-exports
 ├── _model.py                # Dataclasses + enums: Actor, Activity, Object, Interaction, Follower
 ├── _exceptions.py           # ActivityPubError, SignatureVerificationError, DeliveryError, RateLimitError

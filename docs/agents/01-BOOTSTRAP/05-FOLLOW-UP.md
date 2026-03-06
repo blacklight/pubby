@@ -82,7 +82,7 @@ Deferred tasks that are out of scope for the initial library implementation.
 
 ## 12. PyPI Publishing
 
-- [ ] Register `mypub` on PyPI.
+- [ ] Register `pubby` on PyPI.
 - [ ] Set up trusted publishers for automated release on tag.
 - [ ] Add classifiers: `Framework :: Flask`, `Topic :: Internet :: WWW/HTTP :: Dynamic Content`.
 

@@ -6,13 +6,13 @@ from datetime import datetime, timezone
 
 import pytest
 
-from mypub._model import (
+from pubby._model import (
     Follower,
     Interaction,
     InteractionStatus,
     InteractionType,
 )
-from mypub.storage.adapters.file import FileActivityPubStorage
+from pubby.storage.adapters.file import FileActivityPubStorage
 
 
 @pytest.fixture

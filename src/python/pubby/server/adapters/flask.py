@@ -11,7 +11,7 @@ import flask as flask_upstream  # pylint: disable=W0406
 if getattr(flask_upstream, "__file__", None) == __file__:
     raise RuntimeError(
         "Local module name 'flask.py' is shadowing the upstream 'flask' dependency. "
-        "Do not run this file directly; import it as 'mypub.server.adapters.flask'."
+        "Do not run this file directly; import it as 'pubby.server.adapters.flask'."
     )
 
 Flask = flask_upstream.Flask

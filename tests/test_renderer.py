@@ -4,8 +4,8 @@ Tests for interaction rendering — produces valid HTML.
 
 from datetime import datetime, timezone
 
-from mypub._model import Interaction, InteractionStatus, InteractionType
-from mypub.render import InteractionsRenderer
+from pubby._model import Interaction, InteractionStatus, InteractionType
+from pubby.render import InteractionsRenderer
 
 
 def _make_interaction(

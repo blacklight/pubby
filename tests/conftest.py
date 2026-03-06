@@ -4,7 +4,7 @@ Shared test fixtures.
 
 import pytest
 
-from mypub.crypto._keys import generate_rsa_keypair, export_public_key_pem
+from pubby.crypto._keys import generate_rsa_keypair, export_public_key_pem
 
 
 @pytest.fixture

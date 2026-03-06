@@ -50,7 +50,7 @@ class InboxProcessor:
         key_id: str,
         *,
         on_interaction_received: Callable[[Interaction], None] | None = None,
-        user_agent: str = "mypub/0.0.1",
+        user_agent: str = "pubby/0.0.1",
         http_timeout: float = 15.0,
     ):
         self.storage = storage

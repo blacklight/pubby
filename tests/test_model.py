@@ -4,7 +4,7 @@ Tests for model dataclasses: build, serialize, deserialize.
 
 from datetime import datetime, timezone
 
-from mypub._model import (
+from pubby._model import (
     Activity,
     ActivityType,
     Actor,

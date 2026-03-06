@@ -2,7 +2,7 @@
 Tests for WebFinger and NodeInfo response builders.
 """
 
-from mypub.handlers._discovery import (
+from pubby.handlers._discovery import (
     build_nodeinfo_discovery,
     build_nodeinfo_document,
     build_webfinger_response,
@@ -67,7 +67,7 @@ class TestNodeInfoDocument:
         result = build_nodeinfo_document()
 
         assert result["version"] == "2.1"
-        assert result["software"]["name"] == "mypub"
+        assert result["software"]["name"] == "pubby"
         assert result["software"]["version"] == "0.0.1"
         assert "activitypub" in result["protocols"]
         assert result["usage"]["users"]["total"] == 1
