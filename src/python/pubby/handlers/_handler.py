@@ -12,6 +12,7 @@ from markupsafe import Markup
 
 from .._model import (
     Actor,
+    ActorConfig,
     Interaction,
     Object,
     AP_CONTEXT,
@@ -35,9 +36,8 @@ class ActivityPubHandler:
     Main ActivityPub handler.
 
     :param storage: The storage backend.
-    :param actor_config: Dictionary with actor configuration keys:
-        ``username``, ``name``, ``summary``, ``icon_url``, ``base_url``,
-        ``actor_path`` (default ``/ap/actor``).
+    :param actor_config: Actor configuration — an :class:`ActorConfig` instance
+        or a plain ``dict`` (converted automatically for backwards compatibility).
     :param private_key: RSA private key (object or PEM string/bytes).
     :param private_key_path: Path to a PEM-encoded private key file
         (alternative to ``private_key``).
@@ -56,7 +56,7 @@ class ActivityPubHandler:
     def __init__(
         self,
         storage: ActivityPubStorage,
-        actor_config: dict,
+        actor_config: ActorConfig | dict,
         *,
         private_key: rsa.RSAPrivateKey | str | bytes | None = None,
         private_key_path: str | Path | None = None,
@@ -71,15 +71,19 @@ class ActivityPubHandler:
     ):
         self.storage = storage
 
+        # Accept dict or ActorConfig
+        if isinstance(actor_config, dict):
+            actor_config = ActorConfig.from_dict(actor_config)
+
         # Parse actor config
-        self.base_url = actor_config["base_url"].rstrip("/")
-        self.username = actor_config.get("username", "blog")
-        self.actor_name = actor_config.get("name", self.username)
-        self.actor_summary = actor_config.get("summary", "")
-        self.icon_url = actor_config.get("icon_url", "")
-        self.actor_path = actor_config.get("actor_path", "/ap/actor")
-        self.actor_type = actor_config.get("type", "Person")
-        self.manually_approves = actor_config.get("manually_approves_followers", False)
+        self.base_url = actor_config.base_url
+        self.username = actor_config.username
+        self.actor_name = actor_config.name
+        self.actor_summary = actor_config.summary
+        self.icon_url = actor_config.icon_url
+        self.actor_path = actor_config.actor_path
+        self.actor_type = actor_config.type
+        self.manually_approves = actor_config.manually_approves_followers
 
         # Derived URLs
         self.actor_id = f"{self.base_url}{self.actor_path}"

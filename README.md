@@ -304,18 +304,33 @@ thread-safe access via `RLock` per resource.
 | `software_name` | `str` | `"pubby"` | NodeInfo software name |
 | `software_version` | `str` | `"0.0.1"` | NodeInfo software version |
 
-### `actor_config` Keys
+### `actor_config`
 
-| Key | Type | Default | Description |
-|-----|------|---------|-------------|
+Pass an `ActorConfig` dataclass (recommended) or a plain `dict` (backwards compatible):
+
+```python
+from pubby import ActorConfig
+
+config = ActorConfig(
+    base_url="https://example.com",
+    username="blog",
+    name="My Blog",
+    summary="A blog with ActivityPub support",
+)
+
+handler = ActivityPubHandler(storage=storage, actor_config=config, ...)
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
 | `base_url` | `str` | *required* | Public base URL of your site |
 | `username` | `str` | `"blog"` | Actor username (WebFinger handle) |
-| `name` | `str` | username | Display name |
-| `summary` | `str` | `""` | Actor bio/description |
-| `icon_url` | `str` | `""` | Avatar URL |
-| `actor_path` | `str` | `"/ap/actor"` | Path to the actor endpoint |
-| `type` | `str` | `"Person"` | ActivityPub actor type |
-| `manually_approves_followers` | `bool` | `False` | Require follow approval |
+| `name` | `str` | *username* | Display name shown on remote instances |
+| `summary` | `str` | `""` | Actor bio/description (HTML allowed) |
+| `icon_url` | `str` | `""` | Avatar image URL |
+| `actor_path` | `str` | `"/ap/actor"` | URL path to the actor endpoint |
+| `type` | `str` | `"Person"` | ActivityPub actor type (`Person`, `Application`, `Service`) |
+| `manually_approves_followers` | `bool` | `False` | Require explicit follow approval |
 
 ## Rendering Interactions
 
@@ -381,6 +396,24 @@ handler = ActivityPubHandler(
 ## API
 
 ### Data Model
+
+#### `ActorConfig`
+
+Typed configuration for an ActivityPub actor (replaces the old plain-dict approach):
+
+```python
+from pubby import ActorConfig
+
+config = ActorConfig(
+    base_url="https://example.com",
+    username="blog",
+    name="My Blog",
+    summary="A federated blog",
+    type="Person",
+)
+```
+
+See [`actor_config`](#actor_config) in the Configuration Reference for the full field table.
 
 #### `Object`
 

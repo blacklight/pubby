@@ -33,6 +33,12 @@ Generate a semantically correct git commit message with textwrap at 80 chars for
 
 Generate ONLY the commit message - no introduction, no explanation, no quotes around it.
 
+## Documentation
+
+- When adding or changing public API (new classes, functions, parameters), update the corresponding section in `README.md`.
+- Key areas: **API** section (data model, WebFinger, publishing), **Configuration Reference** (`ActorConfig` fields, `ActivityPubHandler` parameters), **Quick Start** examples.
+- Keep docstrings and README in sync — the README is the primary user-facing reference.
+
 ## CHANGELOG
 
 - Add an _Unreleased_ section (if not already present) to `CHANGELOG.md`.

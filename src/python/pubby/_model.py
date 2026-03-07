@@ -138,6 +138,51 @@ AP_CONTEXT = [
 
 
 @dataclass
+class ActorConfig:
+    """
+    Configuration for an ActivityPub actor.
+
+    :param base_url: Public base URL of your site (e.g. ``https://example.com``).
+    :param username: Actor username, used in WebFinger ``acct:`` URIs.
+    :param name: Display name shown on remote instances.
+    :param summary: Short bio / description (HTML allowed).
+    :param icon_url: URL to an avatar image.
+    :param actor_path: URL path to the actor endpoint (appended to *base_url*).
+    :param type: ActivityPub actor type (``Person``, ``Application``, ``Service``, etc.).
+    :param manually_approves_followers: If ``True``, follow requests require
+        explicit approval.
+    """
+
+    base_url: str
+    username: str = "blog"
+    name: str | None = None
+    summary: str = ""
+    icon_url: str = ""
+    actor_path: str = "/ap/actor"
+    type: str = "Person"
+    manually_approves_followers: bool = False
+
+    def __post_init__(self) -> None:
+        self.base_url = self.base_url.rstrip("/")
+        if self.name is None:
+            self.name = self.username
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "ActorConfig":
+        """Create from a plain dict (backwards compatibility)."""
+        return cls(
+            base_url=d["base_url"],
+            username=d.get("username", "blog"),
+            name=d.get("name"),
+            summary=d.get("summary", ""),
+            icon_url=d.get("icon_url", ""),
+            actor_path=d.get("actor_path", "/ap/actor"),
+            type=d.get("type", "Person"),
+            manually_approves_followers=d.get("manually_approves_followers", False),
+        )
+
+
+@dataclass
 class Actor:
     """
     An ActivityPub Actor (Person, Application, Service, etc.).
