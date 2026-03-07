@@ -109,6 +109,14 @@ def _normalize(value: Any) -> Any:
     return value
 
 
+def _parse_language(data: dict) -> str | None:
+    """Extract language from ``contentMap`` keys or explicit ``language`` field."""
+    content_map = data.get("contentMap")
+    if isinstance(content_map, dict) and content_map:
+        return next(iter(content_map))
+    return data.get("language")
+
+
 def _parse_dt(value: object) -> datetime | None:
     """Parse a datetime from various input formats."""
     if value is None:
@@ -290,6 +298,7 @@ class Object:
     to: list[str] = field(default_factory=list)
     cc: list[str] = field(default_factory=list)
     media_type: str | None = None
+    language: str | None = None
 
     def to_dict(self) -> dict:
         """Return the ActivityPub JSON-LD representation."""
@@ -301,6 +310,11 @@ class Object:
             "to": self.to,
             "cc": self.cc,
         }
+
+        if self.language:
+            doc["contentMap"] = {self.language: self.content}
+            if self.summary is not None:
+                doc["summaryMap"] = {self.language: self.summary}
 
         if self.name is not None:
             doc["name"] = self.name
@@ -356,6 +370,7 @@ class Object:
                 else [data["cc"]] if data.get("cc") else []
             ),
             media_type=data.get("mediaType"),
+            language=_parse_language(data),
         )
 
 

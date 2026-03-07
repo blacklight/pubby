@@ -150,6 +150,66 @@ class TestObject:
         assert "summary" not in doc
         assert "sensitive" not in doc
         assert "tag" not in doc
+        assert "contentMap" not in doc
+        assert "summaryMap" not in doc
+        assert "mediaType" not in doc
+
+    def test_language_emits_content_map(self):
+        obj = Object(id="x", content="<p>Hallo</p>", language="de")
+        doc = obj.to_dict()
+        assert doc["contentMap"] == {"de": "<p>Hallo</p>"}
+        assert "summaryMap" not in doc
+
+    def test_language_emits_summary_map(self):
+        obj = Object(id="x", content="<p>Bonjour</p>", summary="Résumé", language="fr")
+        doc = obj.to_dict()
+        assert doc["contentMap"] == {"fr": "<p>Bonjour</p>"}
+        assert doc["summaryMap"] == {"fr": "Résumé"}
+
+    def test_language_not_emitted_when_none(self):
+        obj = Object(id="x", content="hello")
+        doc = obj.to_dict()
+        assert "contentMap" not in doc
+
+    def test_build_parses_language_from_content_map(self):
+        data = {
+            "id": "x",
+            "content": "<p>Ciao</p>",
+            "contentMap": {"it": "<p>Ciao</p>"},
+        }
+        obj = Object.build(data)
+        assert obj.language == "it"
+
+    def test_build_parses_language_field(self):
+        data = {"id": "x", "content": "hello", "language": "en"}
+        obj = Object.build(data)
+        assert obj.language == "en"
+
+    def test_build_content_map_takes_precedence(self):
+        data = {
+            "id": "x",
+            "content": "hello",
+            "contentMap": {"ja": "hello"},
+            "language": "en",
+        }
+        obj = Object.build(data)
+        assert obj.language == "ja"
+
+    def test_build_no_language(self):
+        obj = Object.build({"id": "x", "content": "hello"})
+        assert obj.language is None
+
+    def test_media_type_roundtrip(self):
+        obj = Object(id="x", content="<p>test</p>", media_type="text/html")
+        doc = obj.to_dict()
+        assert doc["mediaType"] == "text/html"
+
+        rebuilt = Object.build(doc)
+        assert rebuilt.media_type == "text/html"
+
+    def test_media_type_omitted_when_none(self):
+        obj = Object(id="x", content="test")
+        assert "mediaType" not in obj.to_dict()
 
 
 class TestActivity:
