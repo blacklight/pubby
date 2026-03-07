@@ -5,20 +5,21 @@ What follows is a list of the follow-up tasks, in order of priority.
 Please use `/home/blacklight/git_tree/pubby/docs/agents/00-BOOTSTRAP/04-PLAN.md` and `/home/blacklight/git_tree/pubby/docs/agents/00-BOOTSTRAP/05-FOLLOW-UP.md` for more in-depth context.
 
 1. [x] **Synchronous/blocking delivery**: Handle requests concurrently through a `ThreadPoolExecutor`. 
-2. [ ] Add **FastAPI** and **Tornado** adapters
-3. [ ] **Madblog** integration
+2. [x] Add **FastAPI** and **Tornado** adapters
+3. [ ] Write down a **README**. Use the following references: `~/git_tree/webmentions/README.md` as a template, and all the relevant parts under `./docs/agents`.
+4. [ ] **Madblog** integration
     - [ ] Wire to the existing Flask implementation
     - [ ] Handle `on_content_change`
     - [ ] Render responses
-4. [ ] **Mentions**: posts that match the `@name@domain.tld` pattern should be rendered as ActivityPub handles, and mention notifications dispatched to the user's inbox. Evaluate whether this should be implemented on Madblog or directly in the library.
-5. [ ] Implement the **Mastodon API** (at least the endpoints that make sense for the supported entities)
-6. [ ] **Moderation**: Implement support for `domain` and `actor` allow/block lists. These should be either lists of strings (regex and IP addresses) or maps in the format `{"domain/URL/FQN/regex/IP": "reason"}`.
+5. [ ] **Mentions**: posts that match the `@name@domain.tld` pattern should be rendered as ActivityPub handles, and mention notifications dispatched to the user's inbox. Evaluate whether this should be implemented on Madblog or directly in the library.
+6. [ ] Implement the **Mastodon API** (at least the endpoints that make sense for the supported entities)
+7. [ ] **Moderation**: Implement support for `domain` and `actor` allow/block lists. These should be either lists of strings (regex and IP addresses) or maps in the format `{"domain/URL/FQN/regex/IP": "reason"}`.
   - [ ] Also expose these lists as configuration options in Madblog
-7. [ ] Support (or document) **multi user/actor** setup
-8. [ ] The discussion on how to handle replies consistently (preferably with a unified interface for ActivityPub and Webmentions) and the proposed implementation can be deferred. For now generate a more detailed plan under `./docs/agents/<nn>-REPLIES.md`
-9. [ ] **Featured collections** / pinned posts
+8. [ ] Support (or document) **multi user/actor** setup
+9. [ ] The discussion on how to handle replies consistently (preferably with a unified interface for ActivityPub and Webmentions) and the proposed implementation can be deferred. For now generate a more detailed plan under `./docs/agents/<nn>-REPLIES.md`
+10. [ ] **Featured collections** / pinned posts
   - [ ] Support that on Madblog too
-10. [ ] **Hashtag federation**.
+11. [ ] **Hashtag federation**.
   - [ ] Add `Hashtag` tag objects to `Article` objects based on article tags/categories.
   - [ ] Deliver to followers of specific hashtags.
 
@@ -37,4 +38,5 @@ If I answer no it means that you should re-analyze the plan files, address my co
 After the implementation phase of each of the tasks:
 
 - [ ] Add a summary of the changes in the `CHANGELOG.md` (follow `AGENTS.md` for guidelines around changelog and commit messages)
-- [ ] Wait for my approval before proceeding with the next task
+- [ ] Tick the task in the list at the beginning of this file as completed
+- [ ] Wait for my approval (`yes` or `next`) before proceeding with the next task

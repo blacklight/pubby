@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 200">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#7c3aed;stop-opacity:0.08"/>
+      <stop offset="100%" style="stop-color:#3b82f6;stop-opacity:0.08"/>
+    </linearGradient>
+    <linearGradient id="text-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#7c3aed"/>
+      <stop offset="100%" style="stop-color:#3b82f6"/>
+    </linearGradient>
+    <linearGradient id="wire" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#7c3aed;stop-opacity:0.3"/>
+      <stop offset="50%" style="stop-color:#3b82f6;stop-opacity:0.5"/>
+      <stop offset="100%" style="stop-color:#7c3aed;stop-opacity:0.3"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="800" height="200" fill="url(#bg)" rx="12"/>
+
+  <!-- Flowing wire/channel lines behind text -->
+  <g stroke="url(#wire)" fill="none" stroke-width="2">
+    <path d="M 0,60 C 120,40 200,80 320,65 S 500,45 600,70 S 720,55 800,65" opacity="0.4"/>
+    <path d="M 0,100 C 100,110 180,85 300,100 S 480,120 580,95 S 700,110 800,100" opacity="0.5"/>
+    <path d="M 0,140 C 130,155 220,125 340,140 S 520,160 620,135 S 740,150 800,140" opacity="0.4"/>
+  </g>
+
+  <!-- Data blocks flowing along wires -->
+  <g fill="#7c3aed" opacity="0.15">
+    <rect x="80" y="54" width="12" height="12" rx="2"/>
+    <rect x="250" y="92" width="10" height="10" rx="2"/>
+    <rect x="450" y="58" width="14" height="14" rx="3"/>
+    <rect x="620" y="130" width="11" height="11" rx="2"/>
+    <rect x="700" y="94" width="9" height="9" rx="2"/>
+  </g>
+  <g fill="#3b82f6" opacity="0.15">
+    <rect x="160" y="132" width="13" height="13" rx="2"/>
+    <rect x="380" y="134" width="10" height="10" rx="2"/>
+    <rect x="540" y="92" width="12" height="12" rx="2"/>
+    <rect x="750" y="58" width="10" height="10" rx="2"/>
+  </g>
+
+  <!-- Main text -->
+  <text x="400" y="118" text-anchor="middle" font-family="'Comic Sans MS', 'Chalkboard SE', 'Marker Felt', cursive, sans-serif" font-size="80" font-weight="bold" fill="url(#text-grad)" letter-spacing="6">
+    Pubby
+  </text>
+
+  <!-- Subtle tagline -->
+  <text x="400" y="158" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="16" fill="#6b7280" letter-spacing="2">
+    ActivityPub for Python
+  </text>
+</svg>
