@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- `language` field on `Object` — when set, `to_dict()` emits `contentMap`
+  (and `summaryMap` if a summary is present), allowing Mastodon, Pleroma,
+  and Akkoma to detect the post language instead of showing a "Translate"
+  button. `Object.build()` parses language from incoming `contentMap` keys
+  or an explicit `language` field.
+
 ## 0.1.3
 
 ### Added
