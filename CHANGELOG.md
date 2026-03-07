@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `ActorConfig` dataclass for typed actor configuration. Replaces the
+  plain-dict `actor_config` parameter with documented, IDE-friendly
+  fields. Plain dicts are still accepted for backwards compatibility
+  (auto-converted via `ActorConfig.from_dict()`).
+- `pubby.webfinger` module with WebFinger client utilities:
+  - `resolve_actor_url(username, domain)` — resolve an ActivityPub
+    actor URL via WebFinger (RFC 7033), with fallback.
+  - `extract_mentions(text)` — find all `@user@domain` patterns in
+    text and resolve each via WebFinger. Returns `Mention` objects.
+  - `Mention` dataclass with `username`, `domain`, `actor_url`,
+    `.acct` property, and `.to_tag()` for ActivityPub tag dicts.
+
 ## [0.1.2]
 
 ### Added
