@@ -244,6 +244,7 @@ class Object:
     attachment: list[dict] = field(default_factory=list)
     to: list[str] = field(default_factory=list)
     cc: list[str] = field(default_factory=list)
+    media_type: str | None = None
 
     def to_dict(self) -> dict:
         """Return the ActivityPub JSON-LD representation."""
@@ -274,6 +275,8 @@ class Object:
             doc["tag"] = self.tag
         if self.attachment:
             doc["attachment"] = self.attachment
+        if self.media_type:
+            doc["mediaType"] = self.media_type
 
         return doc
 
@@ -307,6 +310,7 @@ class Object:
                 if isinstance(data.get("cc"), list)
                 else [data["cc"]] if data.get("cc") else []
             ),
+            media_type=data.get("mediaType"),
         )
 
 
