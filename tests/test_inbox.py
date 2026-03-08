@@ -110,6 +110,67 @@ class TestHandleUndoFollow:
         mock_storage.remove_follower.assert_called_once_with(actor_id)
 
 
+class TestHandleUndoLike:
+    def test_undo_like_deletes_interaction(self, inbox_processor, mock_storage):
+        actor_id = "https://remote.example.com/users/alice"
+        target = "https://blog.example.com/post/1"
+        activity = {
+            "id": f"{actor_id}/activities/undo-like-1",
+            "type": "Undo",
+            "actor": actor_id,
+            "object": {
+                "id": f"{actor_id}/activities/like-1",
+                "type": "Like",
+                "object": target,
+            },
+        }
+
+        inbox_processor.process(activity, skip_verification=True)
+        mock_storage.delete_interaction.assert_called_once_with(
+            actor_id, target, InteractionType.LIKE
+        )
+
+
+class TestHandleUndoBoost:
+    def test_undo_announce_deletes_interaction(self, inbox_processor, mock_storage):
+        actor_id = "https://remote.example.com/users/alice"
+        target = "https://blog.example.com/post/1"
+        activity = {
+            "id": f"{actor_id}/activities/undo-boost-1",
+            "type": "Undo",
+            "actor": actor_id,
+            "object": {
+                "id": f"{actor_id}/activities/announce-1",
+                "type": "Announce",
+                "object": target,
+            },
+        }
+
+        inbox_processor.process(activity, skip_verification=True)
+        mock_storage.delete_interaction.assert_called_once_with(
+            actor_id, target, InteractionType.BOOST
+        )
+
+
+class TestHandleUndoUnknown:
+    def test_undo_unknown_type_ignored(self, inbox_processor, mock_storage):
+        actor_id = "https://remote.example.com/users/alice"
+        activity = {
+            "id": f"{actor_id}/activities/undo-1",
+            "type": "Undo",
+            "actor": actor_id,
+            "object": {
+                "id": f"{actor_id}/activities/unknown-1",
+                "type": "Create",
+                "object": "https://blog.example.com/post/1",
+            },
+        }
+
+        inbox_processor.process(activity, skip_verification=True)
+        mock_storage.delete_interaction.assert_not_called()
+        mock_storage.remove_follower.assert_not_called()
+
+
 class TestHandleCreate:
     @patch("pubby.handlers._inbox.requests")
     def test_create_note_stores_reply(
@@ -149,9 +210,7 @@ class TestHandleCreate:
         assert interaction.author_name == "Alice"
 
     @patch("pubby.handlers._inbox.requests")
-    def test_create_without_reply_to_ignored(
-        self, mock_requests, inbox_processor, mock_storage
-    ):
+    def test_create_without_reply_to_ignored(self, inbox_processor, mock_storage):
         activity = {
             "id": "https://remote.example.com/activities/1",
             "type": "Create",
@@ -264,6 +323,22 @@ class TestHandleDelete:
         mock_storage.delete_interaction_by_object_id.return_value = False
         inbox_processor.process(activity, skip_verification=True)
         assert mock_storage.delete_interaction.call_count == len(InteractionType)
+
+    def test_delete_with_string_object(self, inbox_processor, mock_storage):
+        actor_id = "https://remote.example.com/users/alice"
+        object_id = f"{actor_id}/notes/1"
+        activity = {
+            "id": f"{actor_id}/activities/delete-2",
+            "type": "Delete",
+            "actor": actor_id,
+            "object": object_id,  # string, not dict
+        }
+
+        mock_storage.delete_interaction_by_object_id.return_value = True
+        inbox_processor.process(activity, skip_verification=True)
+        mock_storage.delete_interaction_by_object_id.assert_called_once_with(
+            actor_id, object_id
+        )
 
 
 class TestHandleUpdate:

@@ -159,6 +159,80 @@ class TestInteractions:
         )
         assert len(deleted) == 1
 
+    def test_delete_interaction_by_object_id(self, storage):
+        storage.store_interaction(
+            Interaction(
+                source_actor_id="https://example.com/users/alice",
+                target_resource="https://blog.example.com/post/1",
+                interaction_type=InteractionType.REPLY,
+                object_id="https://example.com/users/alice/statuses/123",
+                content="A reply",
+            )
+        )
+
+        found = storage.delete_interaction_by_object_id(
+            "https://example.com/users/alice",
+            "https://example.com/users/alice/statuses/123",
+        )
+        assert found is True
+
+        interactions = storage.get_interactions("https://blog.example.com/post/1")
+        assert len(interactions) == 0
+
+        deleted = storage.get_interactions(
+            "https://blog.example.com/post/1",
+            status=InteractionStatus.DELETED,
+        )
+        assert len(deleted) == 1
+
+    def test_delete_interaction_by_object_id_not_found(self, storage):
+        found = storage.delete_interaction_by_object_id(
+            "https://example.com/users/alice",
+            "https://example.com/users/alice/statuses/999",
+        )
+        assert found is False
+
+    def test_delete_interaction_by_object_id_wrong_actor(self, storage):
+        storage.store_interaction(
+            Interaction(
+                source_actor_id="https://example.com/users/alice",
+                target_resource="https://blog.example.com/post/1",
+                interaction_type=InteractionType.REPLY,
+                object_id="https://example.com/users/alice/statuses/123",
+            )
+        )
+
+        found = storage.delete_interaction_by_object_id(
+            "https://example.com/users/bob",
+            "https://example.com/users/alice/statuses/123",
+        )
+        assert found is False
+
+        # Original still confirmed
+        interactions = storage.get_interactions("https://blog.example.com/post/1")
+        assert len(interactions) == 1
+
+    def test_delete_interaction_by_object_id_idempotent(self, storage):
+        storage.store_interaction(
+            Interaction(
+                source_actor_id="https://example.com/users/alice",
+                target_resource="https://blog.example.com/post/1",
+                interaction_type=InteractionType.REPLY,
+                object_id="https://example.com/users/alice/statuses/123",
+            )
+        )
+
+        storage.delete_interaction_by_object_id(
+            "https://example.com/users/alice",
+            "https://example.com/users/alice/statuses/123",
+        )
+        # Second call returns False (already deleted)
+        found = storage.delete_interaction_by_object_id(
+            "https://example.com/users/alice",
+            "https://example.com/users/alice/statuses/123",
+        )
+        assert found is False
+
     def test_get_interactions_empty(self, storage):
         assert storage.get_interactions("https://blog.example.com/nonexistent") == []
 
