@@ -429,11 +429,13 @@ obj = Object(
     url="https://example.com/posts/1",
     attributed_to="https://example.com/ap/actor",
     media_type="text/html",  # optional, serialized as "mediaType" in JSON-LD
+    quote_control={"quotePolicy": "public"},  # optional, serialized as "quoteControl"
 )
 ```
 
 Key fields: `id`, `type`, `name`, `content`, `url`, `attributed_to`,
-`published`, `updated`, `summary`, `to`, `cc`, `tag`, `media_type`.
+`published`, `updated`, `summary`, `to`, `cc`, `tag`, `media_type`,
+`quote_control`.
 
 #### `Mention`
 

@@ -142,6 +142,7 @@ def _parse_dt(value: object) -> datetime | None:
 AP_CONTEXT = [
     "https://www.w3.org/ns/activitystreams",
     "https://w3id.org/security/v1",
+    "https://w3id.org/fep/0449",
 ]
 
 
@@ -299,6 +300,7 @@ class Object:
     cc: list[str] = field(default_factory=list)
     media_type: str | None = None
     language: str | None = None
+    quote_control: dict | None = None
 
     def to_dict(self) -> dict:
         """Return the ActivityPub JSON-LD representation."""
@@ -336,6 +338,8 @@ class Object:
             doc["attachment"] = self.attachment
         if self.media_type:
             doc["mediaType"] = self.media_type
+        if self.quote_control is not None:
+            doc["quoteControl"] = self.quote_control
 
         return doc
 
@@ -371,6 +375,7 @@ class Object:
             ),
             media_type=data.get("mediaType"),
             language=_parse_language(data),
+            quote_control=data.get("quoteControl"),
         )
 
 
