@@ -112,7 +112,11 @@ class TestRenderMultipleInteractions:
 
         html = str(renderer.render_interactions(interactions))
         assert "ap-interactions" in html
-        assert "3 Fediverse Interactions" in html
+        assert "ActivityPub" in html
+        # Summary counters
+        assert "💬 1" in html
+        assert "🔁 1" in html
+        assert "⭐ 1" in html
 
     def test_render_empty_collection(self):
         renderer = InteractionsRenderer()
@@ -125,8 +129,8 @@ class TestRenderMultipleInteractions:
         renderer = InteractionsRenderer()
         interactions = [_make_interaction()]
         html = str(renderer.render_interactions(interactions))
-        assert "1 Fediverse Interaction" in html
-        assert "Interactions" not in html
+        assert "ActivityPub" in html
+        assert "ap-interactions" in html
 
 
 class TestHTMLValidity:
