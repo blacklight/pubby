@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## _Unreleased_
+
+### Fixed
+
+- **webfinger**: Accept leading `@` in `acct` resource identifiers.
+- **outbox**: Sign `Content-Type` and `Content-Length` headers for ActivityPub payloads.
+
 ## 0.1.7
 
 ### Added
