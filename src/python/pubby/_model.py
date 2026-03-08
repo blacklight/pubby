@@ -146,6 +146,9 @@ AP_CONTEXT = [
     "https://w3id.org/security/v1",
     "https://w3id.org/fep/0449",
     {
+        "schema": "http://schema.org#",
+        "PropertyValue": "schema:PropertyValue",
+        "value": "schema:value",
         "gts": "https://gotosocial.org/ns#",
         "interactionPolicy": {"@id": "gts:interactionPolicy", "@type": "@id"},
         "canQuote": {"@id": "gts:canQuote", "@type": "@id"},
@@ -169,6 +172,9 @@ class ActorConfig:
     :param type: ActivityPub actor type (``Person``, ``Application``, ``Service``, etc.).
     :param manually_approves_followers: If ``True``, follow requests require
         explicit approval.
+    :param url: Human-readable profile URL.  When set, the actor's ``url``
+        field uses this instead of *base_url*.  Useful for Mastodon profile-link
+        verification (the ``url`` must differ from the attachment link).
     """
 
     base_url: str
@@ -179,6 +185,8 @@ class ActorConfig:
     actor_path: str = "/ap/actor"
     type: str = "Person"
     manually_approves_followers: bool = False
+    attachment: list[dict] = field(default_factory=list)
+    url: str | None = None
 
     def __post_init__(self) -> None:
         self.base_url = self.base_url.rstrip("/")
@@ -197,6 +205,8 @@ class ActorConfig:
             actor_path=d.get("actor_path", "/ap/actor"),
             type=d.get("type", "Person"),
             manually_approves_followers=d.get("manually_approves_followers", False),
+            attachment=d.get("attachment", []),
+            url=d.get("url"),
         )
 
 
@@ -221,6 +231,7 @@ class Actor:
     discoverable: bool = True
     url: str = ""
     endpoints: dict = field(default_factory=dict)
+    attachment: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         """Return the ActivityPub JSON-LD representation."""
@@ -253,6 +264,9 @@ class Actor:
         if self.endpoints:
             doc["endpoints"] = self.endpoints
 
+        if self.attachment:
+            doc["attachment"] = self.attachment
+
         return doc
 
     @classmethod
@@ -283,6 +297,7 @@ class Actor:
             discoverable=data.get("discoverable", True),
             url=data.get("url", ""),
             endpoints=data.get("endpoints", {}),
+            attachment=data.get("attachment", []),
         )
 
 

@@ -3,6 +3,8 @@ Main ActivityPub handler — analogous to WebmentionsHandler.
 """
 
 import logging
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Collection
 
@@ -88,6 +90,8 @@ class ActivityPubHandler:
         self.actor_path = actor_config.actor_path
         self.actor_type = actor_config.type
         self.manually_approves = actor_config.manually_approves_followers
+        self.actor_attachment = actor_config.attachment
+        self.actor_url = actor_config.url or actor_config.base_url
 
         # Derived URLs
         self.actor_id = f"{self.base_url}{self.actor_path}"
@@ -234,11 +238,35 @@ class ActivityPubHandler:
             public_key_pem=self.public_key_pem,
             manually_approves_followers=self.manually_approves,
             discoverable=True,
-            url=self.base_url,
+            url=self.actor_url,
             endpoints={"sharedInbox": self.shared_inbox_url},
+            attachment=self.actor_attachment,
         )
 
         return actor.to_dict()
+
+    def publish_actor_update(self) -> dict:
+        """
+        Publish an ``Update`` activity for the actor itself.
+
+        This pushes profile changes (name, summary, attachment/fields, icon,
+        etc.) to all followers so remote instances refresh their cached copy.
+
+        :return: The published activity dictionary.
+        """
+        actor_doc = self.get_actor_document()
+        activity = {
+            "@context": AP_CONTEXT,
+            "id": f"{self.actor_id}#update-profile-{uuid.uuid4()}",
+            "type": "Update",
+            "actor": self.actor_id,
+            "published": datetime.now(timezone.utc).isoformat(),
+            "to": ["https://www.w3.org/ns/activitystreams#Public"],
+            "cc": [self.followers_url],
+            "object": actor_doc,
+        }
+
+        return self.outbox.publish(activity)
 
     # ---------- Collections ----------
 

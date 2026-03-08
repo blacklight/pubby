@@ -332,6 +332,37 @@ handler = ActivityPubHandler(storage=storage, actor_config=config, ...)
 | `actor_path` | `str` | `"/ap/actor"` | URL path to the actor endpoint |
 | `type` | `str` | `"Person"` | ActivityPub actor type (`Person`, `Application`, `Service`) |
 | `manually_approves_followers` | `bool` | `False` | Require explicit follow approval |
+| `attachment` | `list[dict]` | `[]` | Profile metadata fields (see below) |
+
+#### Profile Metadata (Verified Links)
+
+Mastodon and other Fediverse software display profile metadata fields (the
+key-value pairs shown on a user's profile page). These are passed as
+`PropertyValue` attachments in the actor config:
+
+```python
+handler = ActivityPubHandler(
+    storage=storage,
+    actor_config={
+        "base_url": "https://example.com",
+        "username": "blog",
+        "name": "My Blog",
+        "summary": "A blog with ActivityPub support",
+        "attachment": [
+            {
+                "type": "PropertyValue",
+                "name": "Website",
+                "value": '<a href="https://example.com" rel="me">https://example.com</a>',
+            },
+        ],
+    },
+    private_key=private_key,
+)
+```
+
+For Mastodon's green verified-link checkmark to appear, the linked page must
+contain a `<link rel="me" href="https://example.com/ap/actor">` tag pointing
+back to the actor URL.
 
 ## Rendering Interactions
 
@@ -562,6 +593,20 @@ handler.publish_object(article)                              # Create
 handler.publish_object(updated_article, activity_type="Update")
 handler.publish_object(deleted_article, activity_type="Delete")
 ```
+
+#### `handler.publish_actor_update()`
+
+Push the current actor profile to all followers. Call this after changing
+any actor properties (name, summary, icon, attachment/fields) so remote
+instances refresh their cached copy. This is the standard mechanism used
+by Mastodon when a user edits their profile.
+
+```python
+handler.publish_actor_update()
+```
+
+The method builds an `Update` activity whose `object` is the full actor
+document, and fans it out to every follower inbox.
 
 ### Storage
 
