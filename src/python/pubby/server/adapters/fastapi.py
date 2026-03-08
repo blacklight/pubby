@@ -23,12 +23,6 @@ ACTIVITY_JSON = "application/activity+json"
 JRD_JSON = "application/jrd+json"
 
 
-def _wants_activity_json(request: Request) -> bool:
-    """Check if the client prefers ActivityPub JSON."""
-    accept = request.headers.get("Accept", "")
-    return "application/activity+json" in accept or "application/ld+json" in accept
-
-
 async def get_raw_body(request: Request) -> bytes:
     """Dependency to get raw request body."""
     return await request.body()

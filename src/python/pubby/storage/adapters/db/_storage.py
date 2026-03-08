@@ -30,12 +30,12 @@ class DbActivityPubStorage(ActivityPubStorage):
     def __init__(
         self,
         engine: sa.Engine,
+        *_,
         follower_model: type[DbFollower],
         interaction_model: type[DbInteraction],
         activity_model: type[DbActivity],
         actor_cache_model: type[DbActorCache],
         session_factory: Callable[[], Session],
-        *_,
         **__,
     ):
         self.engine = engine

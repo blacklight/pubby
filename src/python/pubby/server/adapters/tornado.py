@@ -22,12 +22,6 @@ ACTIVITY_JSON = "application/activity+json"
 JRD_JSON = "application/jrd+json"
 
 
-def _wants_activity_json(headers) -> bool:
-    """Check if the client prefers ActivityPub JSON."""
-    accept = headers.get("Accept", "")
-    return "application/activity+json" in accept or "application/ld+json" in accept
-
-
 class BaseActivityPubHandler(tornado.web.RequestHandler):
     """Base handler with shared functionality."""
 

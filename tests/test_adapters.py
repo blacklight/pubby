@@ -17,11 +17,11 @@ class TestWebFinger:
         assert "jrd+json" in ct
 
     def test_missing_resource(self, adapter_client):
-        status, data, ct = adapter_client.get("/.well-known/webfinger")
+        status, _, __ = adapter_client.get("/.well-known/webfinger")
         assert status == 400
 
     def test_wrong_user(self, adapter_client):
-        status, data, ct = adapter_client.get(
+        status, _, __ = adapter_client.get(
             "/.well-known/webfinger?resource=acct:other@blog.example.com"
         )
         assert status == 404
@@ -29,12 +29,12 @@ class TestWebFinger:
 
 class TestNodeInfo:
     def test_discovery(self, adapter_client):
-        status, data, ct = adapter_client.get("/.well-known/nodeinfo")
+        status, data, _ = adapter_client.get("/.well-known/nodeinfo")
         assert status == 200
         assert len(data["links"]) == 1
 
     def test_document(self, adapter_client):
-        status, data, ct = adapter_client.get("/nodeinfo/2.1")
+        status, data, _ = adapter_client.get("/nodeinfo/2.1")
         assert status == 200
         assert data["version"] == "2.1"
         assert "activitypub" in data["protocols"]
@@ -42,7 +42,7 @@ class TestNodeInfo:
 
 class TestActor:
     def test_get_actor(self, adapter_client):
-        status, data, ct = adapter_client.get(
+        status, data, _ = adapter_client.get(
             "/ap/actor",
             headers={"Accept": "application/activity+json"},
         )
@@ -54,7 +54,7 @@ class TestActor:
         assert data["outbox"].endswith("/ap/outbox")
 
     def test_content_type(self, adapter_client):
-        status, data, ct = adapter_client.get(
+        _, __, ct = adapter_client.get(
             "/ap/actor",
             headers={"Accept": "application/activity+json"},
         )
@@ -63,7 +63,7 @@ class TestActor:
 
 class TestInbox:
     def test_invalid_json(self, adapter_client):
-        status, data, ct = adapter_client.post(
+        status, _, __ = adapter_client.post(
             "/ap/inbox",
             data=b"not json",
             headers={"Content-Type": "application/activity+json"},
@@ -77,7 +77,7 @@ class TestInbox:
             "actor": "https://remote.example.com/users/alice",
             "object": "https://blog.example.com/ap/actor",
         }
-        status, data, ct = adapter_client.post(
+        status, _, __ = adapter_client.post(
             "/ap/inbox",
             data=json.dumps(activity).encode(),
             headers={"Content-Type": "application/activity+json"},
@@ -87,31 +87,31 @@ class TestInbox:
 
 class TestOutbox:
     def test_get_outbox(self, adapter_client):
-        status, data, ct = adapter_client.get("/ap/outbox")
+        status, data, _ = adapter_client.get("/ap/outbox")
         assert status == 200
         assert data["type"] == "OrderedCollection"
         assert "orderedItems" in data
 
     def test_content_type(self, adapter_client):
-        status, data, ct = adapter_client.get("/ap/outbox")
+        _, __, ct = adapter_client.get("/ap/outbox")
         assert "application/activity+json" in ct
 
 
 class TestFollowers:
     def test_get_followers(self, adapter_client):
-        status, data, ct = adapter_client.get("/ap/followers")
+        status, data, _ = adapter_client.get("/ap/followers")
         assert status == 200
         assert data["type"] == "OrderedCollection"
         assert data["totalItems"] == 0
 
     def test_content_type(self, adapter_client):
-        status, data, ct = adapter_client.get("/ap/followers")
+        _, __, ct = adapter_client.get("/ap/followers")
         assert "application/activity+json" in ct
 
 
 class TestFollowing:
     def test_get_following(self, adapter_client):
-        status, data, ct = adapter_client.get("/ap/following")
+        status, data, _ = adapter_client.get("/ap/following")
         assert status == 200
         assert data["type"] == "OrderedCollection"
         assert data["totalItems"] == 0
@@ -136,7 +136,7 @@ class TestRateLimiting:
         )
 
         # Third should be rate-limited
-        status, data, ct = rate_limited_client.post(
+        status, _, __ = rate_limited_client.post(
             "/ap/inbox",
             data=activity.encode(),
             headers={"Content-Type": "application/activity+json"},

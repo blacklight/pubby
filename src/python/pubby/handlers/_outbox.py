@@ -55,6 +55,7 @@ class OutboxProcessor:
         max_delivery_workers: int = 10,
         user_agent: str | None = None,
         http_timeout: float = 15.0,
+        **_,
     ):
         self.storage = storage
         self.actor_id = actor_id
