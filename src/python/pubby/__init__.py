@@ -22,7 +22,7 @@ from ._model import (
 from ._rate_limit import RateLimiter
 from .webfinger import Mention, extract_mentions, resolve_actor_url
 
-__version__ = "0.1.4"
+__version__ = "0.1.5"
 
 __all__ = [
     "Activity",
