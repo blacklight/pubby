@@ -235,9 +235,22 @@ class InteractionsRenderer:
         :param template: Optional custom template.
         :return: Rendered HTML markup.
         """
-        rendered = [self.render_interaction(i) for i in interactions]
+
+        def _sort_key(interaction: Interaction):
+            return (
+                interaction.created_at
+                or interaction.published
+                or datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
+            )
+
+        sorted_interactions = sorted(
+            interactions,
+            key=_sort_key,
+            reverse=True,
+        )
+        rendered = [self.render_interaction(i) for i in sorted_interactions]
         counts = {"likes": 0, "boosts": 0, "replies": 0, "quotes": 0, "mentions": 0}
-        for i in interactions:
+        for i in sorted_interactions:
             itype = getattr(i, "interaction_type", None)
             if itype is not None:
                 type_val = itype.value if hasattr(itype, "value") else str(itype)
