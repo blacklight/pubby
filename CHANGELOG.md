@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Changed
+- Treat incoming ActivityPub `Create` activities that directly mention the
+  local actor as interactions (guestbook entries).
+
+### Added
+- Detection of direct mentions via `to`/`cc` recipients and `tag` objects of
+  type `Mention` targeting the actor.
+
+### Updated
+- Interaction classification precedence is now: **quote > reply > mention**;
+  `Create` activities without any of these signals are ignored.
+
 ## _0.2.0_
 
 ### Added
