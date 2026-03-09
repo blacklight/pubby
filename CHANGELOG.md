@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## _Unreleased_
+
+### Fixed
+
+- **render**: Render interactions by creation date (descending)
+
 ## _0.1.8_
 
 ### Fixed
