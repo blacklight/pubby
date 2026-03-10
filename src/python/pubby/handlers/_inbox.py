@@ -350,6 +350,19 @@ class InboxProcessor:
 
         return False
 
+    @staticmethod
+    def _extract_mentioned_actors(obj_data: dict) -> list[str]:
+        """Extract actor URLs from Mention tags in the object data."""
+        mentioned = []
+        tags = obj_data.get("tag", [])
+        if isinstance(tags, list):
+            for tag in tags:
+                if isinstance(tag, dict) and tag.get("type") == "Mention":
+                    href = tag.get("href")
+                    if isinstance(href, str) and href:
+                        mentioned.append(href)
+        return mentioned
+
     def _handle_create(self, activity: Activity, _: dict) -> dict | None:
         """Handle an incoming Create activity (reply/comment, quote, or mention)."""
         obj_data = activity.object
@@ -390,6 +403,8 @@ class InboxProcessor:
             elif isinstance(icon, str):
                 author_photo = icon
 
+        mentioned_actors = self._extract_mentioned_actors(obj_data)
+
         interaction = Interaction(
             source_actor_id=activity.actor,
             target_resource=effective_target or "",
@@ -403,6 +418,7 @@ class InboxProcessor:
             published=obj.published or datetime.now(timezone.utc),
             status=InteractionStatus.CONFIRMED,
             metadata={"raw_object": obj_data},
+            mentioned_actors=mentioned_actors,
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
         )
@@ -410,8 +426,8 @@ class InboxProcessor:
         if self.on_interaction_received:
             self.on_interaction_received(interaction)
 
-        mentions_actor = interaction_type == InteractionType.MENTION
-        if self._should_store_interaction(effective_target or "", mentions_actor):
+        mentions_local_actor = self.actor_id in mentioned_actors
+        if self._should_store_interaction(effective_target or "", mentions_local_actor):
             self.storage.store_interaction(interaction)
             logger.info(
                 "Stored %s from %s on %s",

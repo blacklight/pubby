@@ -1131,3 +1131,98 @@ class TestStoreLocalOnly:
         callback.assert_called_once()
         # But interaction should not be stored
         mock_storage.store_interaction.assert_not_called()
+
+
+class TestMentionExtraction:
+    """Tests for extracting mentioned actors from tags."""
+
+    def test_extract_mentioned_actors_from_tags(self):
+        """Should extract href from Mention tags."""
+        obj_data = {
+            "type": "Note",
+            "content": "Hello @alice @bob",
+            "tag": [
+                {"type": "Mention", "href": "https://example.com/users/alice"},
+                {"type": "Mention", "href": "https://example.com/users/bob"},
+                {"type": "Hashtag", "name": "#test"},
+            ],
+        }
+        result = InboxProcessor._extract_mentioned_actors(obj_data)
+        assert result == [
+            "https://example.com/users/alice",
+            "https://example.com/users/bob",
+        ]
+
+    def test_extract_mentioned_actors_empty_tags(self):
+        """Should return empty list when no tags."""
+        obj_data = {"type": "Note", "content": "Hello"}
+        result = InboxProcessor._extract_mentioned_actors(obj_data)
+        assert result == []
+
+    def test_extract_mentioned_actors_no_mentions(self):
+        """Should return empty list when no Mention tags."""
+        obj_data = {
+            "type": "Note",
+            "tag": [{"type": "Hashtag", "name": "#test"}],
+        }
+        result = InboxProcessor._extract_mentioned_actors(obj_data)
+        assert result == []
+
+    def test_extract_mentioned_actors_invalid_tags(self):
+        """Should handle invalid tag structures gracefully."""
+        obj_data = {
+            "type": "Note",
+            "tag": [
+                {"type": "Mention"},  # Missing href
+                {"type": "Mention", "href": ""},  # Empty href
+                {"type": "Mention", "href": "https://example.com/users/valid"},
+                "not a dict",
+            ],
+        }
+        result = InboxProcessor._extract_mentioned_actors(obj_data)
+        assert result == ["https://example.com/users/valid"]
+
+    @patch("pubby.handlers._inbox.requests")
+    def test_create_populates_mentioned_actors(
+        self, mock_requests, inbox_processor, mock_storage
+    ):
+        """Create activity should populate mentioned_actors on interaction."""
+        actor_id = "https://remote.example.com/users/alice"
+        actor_data = _remote_actor_data(actor_id)
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = actor_data
+        mock_resp.raise_for_status = MagicMock()
+        mock_requests.get.return_value = mock_resp
+
+        activity = {
+            "id": f"{actor_id}/activities/create-1",
+            "type": "Create",
+            "actor": actor_id,
+            "object": {
+                "id": f"{actor_id}/notes/1",
+                "type": "Note",
+                "content": "Hello @blog @other",
+                "inReplyTo": "https://blog.example.com/posts/1",
+                "tag": [
+                    {
+                        "type": "Mention",
+                        "href": "https://blog.example.com/ap/actor",
+                    },
+                    {
+                        "type": "Mention",
+                        "href": "https://other.example.com/users/bob",
+                    },
+                ],
+            },
+        }
+
+        inbox_processor.process(activity, skip_verification=True)
+
+        mock_storage.store_interaction.assert_called_once()
+        interaction = mock_storage.store_interaction.call_args[0][0]
+        assert interaction.mentioned_actors == [
+            "https://blog.example.com/ap/actor",
+            "https://other.example.com/users/bob",
+        ]
