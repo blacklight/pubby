@@ -78,6 +78,7 @@ class FlaskAdapterClient(AdapterClient):
         app.config["TESTING"] = True
         bind_activitypub(app, handler, rate_limiter=rate_limiter)
         self._client = app.test_client()
+        self._handler = handler
 
     def get(self, path, headers=None):
         resp = self._client.get(path, headers=headers or {})
@@ -105,6 +106,7 @@ class FastAPIAdapterClient(AdapterClient):
         app = FastAPI()
         bind_activitypub(app, handler, rate_limiter=rate_limiter)
         self._client = TestClient(app)
+        self._handler = handler
 
     def get(self, path, headers=None):
         resp = self._client.get(path, headers=headers or {})
@@ -146,6 +148,7 @@ class TornadoAdapterClient(AdapterClient):
         self._port = port
         self._server = server
         self._sock = sock
+        self._handler = handler
         self._thread = threading.Thread(target=self._loop.start, daemon=True)
         self._loop.add_callback(lambda: None)  # ensure loop is started
         self._thread.start()

@@ -211,7 +211,7 @@ def bind_activitypub(
         (rf"{prefix}/followers", FollowersHandler, init_kwargs),
         (rf"{prefix}/following", FollowingHandler, init_kwargs),
         (
-            rf"{prefix}/quote_authorizations/(.*)",
+            rf"{handler.actor_path}/quote_authorizations/(.*)",
             QuoteAuthorizationHandler,
             init_kwargs,
         ),

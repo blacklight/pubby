@@ -164,7 +164,9 @@ def bind_activitypub(
         return response
 
     # -- Quote authorizations --
-    @app.route(f"{prefix}/quote_authorizations/<path:auth_id>", methods=["GET"])
+    @app.route(
+        f"{handler.actor_path}/quote_authorizations/<path:auth_id>", methods=["GET"]
+    )
     def _quote_authorization(auth_id):
         full_id = f"{handler.actor_id}/quote_authorizations/{auth_id}"
         doc = handler.get_quote_authorization(full_id)

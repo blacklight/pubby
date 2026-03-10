@@ -144,14 +144,17 @@ def bind_activitypub(
         doc = handler.get_following_collection()
         return JSONResponse(content=doc, media_type=ACTIVITY_JSON)
 
+    # Include the router with the prefix
+    app.include_router(router)
+
     # -- Quote authorizations --
-    @router.get("/quote_authorizations/{auth_id:path}")
+    # Registered directly on the app because auth IDs are derived from
+    # actor_id (e.g. /ap/actor/quote_authorizations/{uuid}), which
+    # includes the actor path, not just the prefix.
+    @app.get(f"{handler.actor_path}/quote_authorizations/{{auth_id:path}}")
     def quote_authorization(auth_id: str):
         full_id = f"{handler.actor_id}/quote_authorizations/{auth_id}"
         doc = handler.get_quote_authorization(full_id)
         if doc is None:
             return JSONResponse(content={"error": "not found"}, status_code=404)
         return JSONResponse(content=doc, media_type=ACTIVITY_JSON)
-
-    # Include the router with the prefix
-    app.include_router(router)

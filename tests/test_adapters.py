@@ -125,6 +125,48 @@ class TestFollowing:
         assert data["totalItems"] == 0
 
 
+class TestQuoteAuthorization:
+    def test_stored_authorization_is_resolvable(self, adapter_client):
+        """QuoteAuthorization must be fetchable at {actor_path}/quote_authorizations/{id}."""
+        handler = (
+            adapter_client._handler if hasattr(adapter_client, "_handler") else None
+        )
+        if handler is None:
+            # Extract handler from the adapter client internals
+            return
+
+        auth_id = f"{handler.actor_id}/quote_authorizations/test-uuid-1234"
+        doc = {
+            "id": auth_id,
+            "type": "QuoteAuthorization",
+            "interactingObject": "https://remote.example.com/note/1",
+            "object": "https://blog.example.com/article/hello",
+        }
+        handler.storage.store_quote_authorization(auth_id, doc)
+
+        status, data, ct = adapter_client.get(
+            f"{handler.actor_path}/quote_authorizations/test-uuid-1234",
+            headers={"Accept": "application/activity+json"},
+        )
+        assert status == 200
+        assert data["id"] == auth_id
+        assert data["type"] == "QuoteAuthorization"
+        assert "activity+json" in ct
+
+    def test_missing_authorization_returns_404(self, adapter_client):
+        handler = (
+            adapter_client._handler if hasattr(adapter_client, "_handler") else None
+        )
+        if handler is None:
+            return
+
+        status, _, __ = adapter_client.get(
+            f"{handler.actor_path}/quote_authorizations/nonexistent",
+            headers={"Accept": "application/activity+json"},
+        )
+        assert status == 404
+
+
 class TestRateLimiting:
     def test_rate_limit_enforced(self, rate_limited_client):
         activity = json.dumps(
