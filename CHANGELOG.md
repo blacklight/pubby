@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+- **ActivityPub QuoteAuthorization routing:** QuoteAuthorization resources are
+  now served under `actor_path` (`/ap/actor/quote_authorizations/...`) instead
+  of the server prefix (`/ap/quote_authorizations/...`), preventing 404s when
+  remote servers dereference authorization IDs (per FEP-044f). Applied across
+  **Flask**, **FastAPI**, and **Tornado**.
+
+### Tests
+- Added regression tests ensuring stored QuoteAuthorizations are resolvable at
+  `{actor_path}/quote_authorizations/{id}` and missing ones return **404**.
+- Adapter test clients now expose the bound handler to support adapter-agnostic tests.
+
 ## 0.2.3
 
 ### Fixed
