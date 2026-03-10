@@ -8,6 +8,12 @@ A Python >= 3.8 library to wire ActivityPub support to any Python Web applicatio
 
 Design decisions are documented under `./docs/agents`. Directories and files follow the `<nn>-title` naming convention, with `<nn>` being the number of the design decision.
 
+## Architecture
+
+Use `./docs/ARCHITECTURE.md` as a reference.
+
+Any additions, changes or deletions of components should also be reflected in the architecture document.
+
 ## Correctness
 
 - **Always run `pytest`** after code modifications, before committing. Fix any issues it reports before proceeding.
