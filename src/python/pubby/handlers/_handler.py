@@ -54,6 +54,12 @@ class ActivityPubHandler:
     :param auto_approve_quotes: If ``True`` (default), automatically send a
         ``QuoteAuthorization`` when an incoming quote targets a local object,
         so the remote server clears its "pending" state.
+    :param store_local_only: If ``True``, only store interactions whose
+        ``target_resource`` starts with a configured base URL, or that
+        mention the local actor. The ``on_interaction_received`` callback
+        is still invoked for all interactions.
+    :param local_base_urls: List of base URLs considered "local". If empty,
+        defaults to the actor's base URL.
     :param software_name: Software name for NodeInfo.
     :param software_version: Software version for NodeInfo.
     """
@@ -72,6 +78,8 @@ class ActivityPubHandler:
         max_retries: int = 3,
         max_delivery_workers: int = 10,
         auto_approve_quotes: bool = True,
+        store_local_only: bool = False,
+        local_base_urls: list[str] | None = None,
         software_name: str = "pubby",
         software_version: str = "0.0.1",
     ):
@@ -135,6 +143,8 @@ class ActivityPubHandler:
             user_agent=user_agent,
             http_timeout=http_timeout,
             auto_approve_quotes=auto_approve_quotes,
+            store_local_only=store_local_only,
+            local_base_urls=local_base_urls,
         )
 
         self.outbox = OutboxProcessor(

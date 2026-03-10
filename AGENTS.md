@@ -12,7 +12,7 @@ Design decisions are documented under `./docs/agents`. Directories and files fol
 
 Use `./docs/ARCHITECTURE.md` as a reference.
 
-Any additions, changes or deletions of components should also be reflected in the architecture document.
+Any additions, changes or deletions of components should also be reflected in the architecture document and, if user-facing, also in the README.
 
 ## Correctness
 

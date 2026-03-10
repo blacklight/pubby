@@ -934,3 +934,200 @@ class TestFetchActorGone:
         assert result is None
         mock_logger.warning.assert_called_once()
         mock_logger.debug.assert_not_called()
+
+
+class TestStoreLocalOnly:
+    """Tests for the store_local_only filtering feature."""
+
+    @pytest.fixture
+    def local_only_processor(self, mock_storage, private_key):
+        return InboxProcessor(
+            storage=mock_storage,
+            actor_id="https://blog.example.com/ap/actor",
+            private_key=private_key,
+            key_id="https://blog.example.com/ap/actor#main-key",
+            store_local_only=True,
+            local_base_urls=["https://blog.example.com/"],
+        )
+
+    @patch("pubby.handlers._inbox.requests")
+    def test_create_local_target_is_stored(
+        self, mock_requests, local_only_processor, mock_storage
+    ):
+        """Create activity with local target_resource should be stored."""
+        actor_id = "https://remote.example.com/users/alice"
+        actor_data = _remote_actor_data(actor_id)
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = actor_data
+        mock_resp.raise_for_status = MagicMock()
+        mock_requests.get.return_value = mock_resp
+
+        activity = {
+            "id": f"{actor_id}/activities/create-1",
+            "type": "Create",
+            "actor": actor_id,
+            "object": {
+                "id": f"{actor_id}/notes/1",
+                "type": "Note",
+                "content": "Nice post!",
+                "inReplyTo": "https://blog.example.com/posts/1",
+            },
+        }
+
+        local_only_processor.process(activity, skip_verification=True)
+        mock_storage.store_interaction.assert_called_once()
+
+    @patch("pubby.handlers._inbox.requests")
+    def test_create_remote_target_is_not_stored(
+        self, mock_requests, local_only_processor, mock_storage
+    ):
+        """Create activity with non-local target_resource should not be stored."""
+        actor_id = "https://remote.example.com/users/alice"
+        actor_data = _remote_actor_data(actor_id)
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = actor_data
+        mock_resp.raise_for_status = MagicMock()
+        mock_requests.get.return_value = mock_resp
+
+        activity = {
+            "id": f"{actor_id}/activities/create-1",
+            "type": "Create",
+            "actor": actor_id,
+            "object": {
+                "id": f"{actor_id}/notes/1",
+                "type": "Note",
+                "content": "Nice post!",
+                "inReplyTo": "https://other.example.com/posts/1",
+            },
+        }
+
+        local_only_processor.process(activity, skip_verification=True)
+        mock_storage.store_interaction.assert_not_called()
+
+    @patch("pubby.handlers._inbox.requests")
+    def test_create_mention_of_actor_is_stored(
+        self, mock_requests, local_only_processor, mock_storage
+    ):
+        """Create with remote target but mentioning actor should be stored."""
+        actor_id = "https://remote.example.com/users/alice"
+        actor_data = _remote_actor_data(actor_id)
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = actor_data
+        mock_resp.raise_for_status = MagicMock()
+        mock_requests.get.return_value = mock_resp
+
+        # Mention the actor directly (no inReplyTo)
+        activity = {
+            "id": f"{actor_id}/activities/create-1",
+            "type": "Create",
+            "actor": actor_id,
+            "to": ["https://blog.example.com/ap/actor"],
+            "object": {
+                "id": f"{actor_id}/notes/1",
+                "type": "Note",
+                "content": "@blog Hello!",
+                "tag": [
+                    {
+                        "type": "Mention",
+                        "href": "https://blog.example.com/ap/actor",
+                        "name": "@blog@blog.example.com",
+                    }
+                ],
+            },
+        }
+
+        local_only_processor.process(activity, skip_verification=True)
+        mock_storage.store_interaction.assert_called_once()
+
+    @patch("pubby.handlers._inbox.requests")
+    def test_like_remote_target_not_stored(
+        self, mock_requests, local_only_processor, mock_storage
+    ):
+        """Like of non-local object should not be stored."""
+        actor_id = "https://remote.example.com/users/alice"
+        actor_data = _remote_actor_data(actor_id)
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = actor_data
+        mock_resp.raise_for_status = MagicMock()
+        mock_requests.get.return_value = mock_resp
+
+        activity = {
+            "id": f"{actor_id}/activities/like-1",
+            "type": "Like",
+            "actor": actor_id,
+            "object": "https://other.example.com/posts/1",
+        }
+
+        local_only_processor.process(activity, skip_verification=True)
+        mock_storage.store_interaction.assert_not_called()
+
+    @patch("pubby.handlers._inbox.requests")
+    def test_announce_local_target_is_stored(
+        self, mock_requests, local_only_processor, mock_storage
+    ):
+        """Announce of local object should be stored."""
+        actor_id = "https://remote.example.com/users/alice"
+        actor_data = _remote_actor_data(actor_id)
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = actor_data
+        mock_resp.raise_for_status = MagicMock()
+        mock_requests.get.return_value = mock_resp
+
+        activity = {
+            "id": f"{actor_id}/activities/announce-1",
+            "type": "Announce",
+            "actor": actor_id,
+            "object": "https://blog.example.com/posts/1",
+        }
+
+        local_only_processor.process(activity, skip_verification=True)
+        mock_storage.store_interaction.assert_called_once()
+
+    @patch("pubby.handlers._inbox.requests")
+    def test_callback_invoked_for_non_stored_interaction(
+        self, mock_requests, mock_storage, private_key
+    ):
+        """on_interaction_received should be called even for non-stored interactions."""
+        callback = MagicMock()
+        processor = InboxProcessor(
+            storage=mock_storage,
+            actor_id="https://blog.example.com/ap/actor",
+            private_key=private_key,
+            key_id="https://blog.example.com/ap/actor#main-key",
+            store_local_only=True,
+            local_base_urls=["https://blog.example.com/"],
+            on_interaction_received=callback,
+        )
+
+        actor_id = "https://remote.example.com/users/alice"
+        actor_data = _remote_actor_data(actor_id)
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = actor_data
+        mock_resp.raise_for_status = MagicMock()
+        mock_requests.get.return_value = mock_resp
+
+        activity = {
+            "id": f"{actor_id}/activities/like-1",
+            "type": "Like",
+            "actor": actor_id,
+            "object": "https://other.example.com/posts/1",
+        }
+
+        processor.process(activity, skip_verification=True)
+
+        # Callback should still be invoked
+        callback.assert_called_once()
+        # But interaction should not be stored
+        mock_storage.store_interaction.assert_not_called()

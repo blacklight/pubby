@@ -43,6 +43,12 @@ class InboxProcessor:
     :param user_agent: User-Agent for outgoing HTTP requests. Default:
         ``pubby/{version} (+{actor_id})``
     :param http_timeout: Timeout for outgoing HTTP requests.
+    :param store_local_only: If ``True``, only store interactions whose
+        ``target_resource`` starts with a configured base URL, or that
+        mention the local actor. The ``on_interaction_received`` callback
+        is still invoked for all interactions.
+    :param local_base_urls: List of base URLs considered "local". If empty,
+        defaults to the actor's base URL (derived from ``actor_id``).
     """
 
     def __init__(
@@ -56,6 +62,8 @@ class InboxProcessor:
         user_agent: str | None = None,
         http_timeout: float = 15.0,
         auto_approve_quotes: bool = True,
+        store_local_only: bool = False,
+        local_base_urls: list[str] | None = None,
     ):
         self.storage = storage
         self.actor_id = actor_id
@@ -65,6 +73,23 @@ class InboxProcessor:
         self.http_timeout = http_timeout
         self.user_agent = user_agent or get_default_user_agent(actor_id)
         self.auto_approve_quotes = auto_approve_quotes
+        self.store_local_only = store_local_only
+        self.local_base_urls = local_base_urls or []
+
+    def _is_local_target(self, target_resource: str) -> bool:
+        """Check if target_resource is considered local."""
+        base_urls = self.local_base_urls or [self.actor_id.rsplit("/", 1)[0]]
+        return any(target_resource.startswith(base) for base in base_urls)
+
+    def _should_store_interaction(
+        self,
+        target_resource: str,
+        mentions_actor: bool = False,
+    ) -> bool:
+        """Determine if an interaction should be stored based on store_local_only."""
+        if not self.store_local_only:
+            return True
+        return self._is_local_target(target_resource) or mentions_actor
 
     def _fetch_actor(self, actor_id: str) -> dict | None:
         """Fetch a remote actor document, using cache if available."""
@@ -382,16 +407,25 @@ class InboxProcessor:
             updated_at=datetime.now(timezone.utc),
         )
 
-        self.storage.store_interaction(interaction)
         if self.on_interaction_received:
             self.on_interaction_received(interaction)
 
-        logger.info(
-            "Stored %s from %s on %s",
-            interaction_type.value,
-            activity.actor,
-            effective_target,
-        )
+        mentions_actor = interaction_type == InteractionType.MENTION
+        if self._should_store_interaction(effective_target or "", mentions_actor):
+            self.storage.store_interaction(interaction)
+            logger.info(
+                "Stored %s from %s on %s",
+                interaction_type.value,
+                activity.actor,
+                effective_target,
+            )
+        else:
+            logger.debug(
+                "Skipped storing %s from %s on %s (non-local)",
+                interaction_type.value,
+                activity.actor,
+                effective_target,
+            )
 
         return None
 
@@ -436,11 +470,17 @@ class InboxProcessor:
             updated_at=datetime.now(timezone.utc),
         )
 
-        self.storage.store_interaction(interaction)
         if self.on_interaction_received:
             self.on_interaction_received(interaction)
 
-        logger.info("Stored like from %s on %s", activity.actor, target)
+        if self._should_store_interaction(target):
+            self.storage.store_interaction(interaction)
+            logger.info("Stored like from %s on %s", activity.actor, target)
+        else:
+            logger.debug(
+                "Skipped storing like from %s on %s (non-local)", activity.actor, target
+            )
+
         return None
 
     def _handle_announce(self, activity: Activity, _: dict) -> dict | None:
@@ -484,11 +524,19 @@ class InboxProcessor:
             updated_at=datetime.now(timezone.utc),
         )
 
-        self.storage.store_interaction(interaction)
         if self.on_interaction_received:
             self.on_interaction_received(interaction)
 
-        logger.info("Stored boost from %s on %s", activity.actor, target)
+        if self._should_store_interaction(target):
+            self.storage.store_interaction(interaction)
+            logger.info("Stored boost from %s on %s", activity.actor, target)
+        else:
+            logger.debug(
+                "Skipped storing boost from %s on %s (non-local)",
+                activity.actor,
+                target,
+            )
+
         return None
 
     def _handle_delete(self, activity: Activity, _: dict) -> dict | None:

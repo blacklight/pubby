@@ -367,6 +367,8 @@ thread-safe access via `RLock` per resource.
 | `max_retries` | `int` | `3` | Delivery retry attempts |
 | `max_delivery_workers` | `int` | `10` | Concurrent delivery threads |
 | `auto_approve_quotes` | `bool` | `True` | Auto-send `QuoteAuthorization` for incoming quotes |
+| `store_local_only` | `bool` | `False` | Only store interactions targeting local URLs or mentioning the actor |
+| `local_base_urls` | `list[str]` | `None` | Base URLs considered "local" (defaults to actor's base URL) |
 | `software_name` | `str` | `"pubby"` | NodeInfo software name |
 | `software_version` | `str` | `"0.0.1"` | NodeInfo software version |
 
