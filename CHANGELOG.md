@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+- Inbox actor fetching now treats **HTTP 410 Gone** (deleted remote actors) as non-fatal: returns `None` and logs at **DEBUG** instead of warning.
+
 ## 0.2.2
 
 ### Fixed
