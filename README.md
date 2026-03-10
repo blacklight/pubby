@@ -318,6 +318,9 @@ class MyStorage(ActivityPubStorage):
     def get_interactions(self, target_resource: str | None = None, interaction_type: str | None = None) -> list[Interaction]:
         ...
 
+    def get_interactions_mentioning(self, actor_url: str, interaction_type: str | None = None) -> list[Interaction]:
+        ...  # Optional: returns interactions where actor_url is in mentioned_actors
+
     def store_activity(self, activity_id: str, activity_data: dict):
         ...
 

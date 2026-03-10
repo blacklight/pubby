@@ -97,6 +97,25 @@ class ActivityPubStorage(ABC):
         :return: A list of Interaction records.
         """
 
+    def get_interactions_mentioning(
+        self,
+        actor_url: str,
+        interaction_type: InteractionType | None = None,
+        status: InteractionStatus = InteractionStatus.CONFIRMED,
+    ) -> list[Interaction]:
+        """
+        Retrieve interactions that mention a given actor URL.
+
+        This uses the ``mentioned_actors`` field populated at write time
+        from the ActivityPub object's ``tag`` array (Mention tags).
+
+        :param actor_url: The actor URL to search for in mentions.
+        :param interaction_type: Optional filter by interaction type.
+        :param status: Filter by status (default: CONFIRMED).
+        :return: A list of Interaction records mentioning the actor.
+        """
+        return []
+
     # ---------- Activities (outbox records) ----------
 
     @abstractmethod
