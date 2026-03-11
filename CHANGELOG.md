@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 0.2.7
 
 ### Fixed
 - **File storage:** Made `delete_interaction_by_object_id` more robust when
