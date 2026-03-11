@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Docs
+- Added missing **AGPL-3.0** license text (`LICENSE.txt`).
+- Enhanced `README.md` with additional project badges and a generated table of
+  contents with section anchors.
+
+### Chore
+- Updated pre-commit configuration to auto-generate/maintain the README TOC via
+  the `md-toc` hook (GitHub style, max depth 6).
+
 ## 0.2.10
 
 ## Changed
