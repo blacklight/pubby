@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 0.2.8
 
 ### Changed
 - Removed `max-height` from expanded interactions
