@@ -20,6 +20,10 @@ Any additions, changes or deletions of components should also be reflected in th
 - Every new feature or code change should be accompanied by at least a unit test in order to keep test coverage high.
 - **Do not commit** after implementing, unless prompted explicitly.
 
+## Back-compatibility
+
+- File storage has schema versions. See `docs/ARCHITECTURE.md`. When breaking changes are made on the file storage, or indices are added that require backfilling, update the schema version.
+
 ## Style
 
 - **Always run `pre-commit run --all-files`** after code modifications, before committing. Fix any issues it reports before proceeding.

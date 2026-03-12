@@ -513,3 +513,61 @@ class TestActorCache:
 
         cached = storage.get_cached_actor("https://mastodon.social/users/alice")
         assert cached["name"] == "Alice Updated"
+
+
+class TestSchemaMigration:
+    def test_new_storage_sets_current_version(self, tmp_path):
+        from pubby.storage.adapters.file._storage import SCHEMA_VERSION
+
+        storage = FileActivityPubStorage(data_dir=tmp_path)
+        assert storage._get_schema_version() == SCHEMA_VERSION
+
+    def test_auto_migrate_disabled(self, tmp_path):
+        storage = FileActivityPubStorage(data_dir=tmp_path, auto_migrate=False)
+        # No version file should be created
+        assert storage._get_schema_version() == 0
+
+    def test_migration_backfills_object_id_index(self, tmp_path):
+        # Create storage without auto-migrate
+        storage = FileActivityPubStorage(data_dir=tmp_path, auto_migrate=False)
+
+        # Store an interaction manually (bypassing migration)
+        interaction = Interaction(
+            source_actor_id="https://mastodon.social/users/alice",
+            target_resource="https://blog.example.com/post/1",
+            interaction_type=InteractionType.REPLY,
+            object_id="https://mastodon.social/users/alice/statuses/123",
+        )
+        storage.store_interaction(interaction)
+
+        # Remove the index to simulate pre-v2 state
+        index_path = storage._object_id_index_path(interaction.object_id)
+        if index_path.exists():
+            index_path.unlink()
+
+        # Verify index is gone
+        assert not index_path.exists()
+
+        # Now run migrations
+        storage._run_migrations()
+
+        # Index should be recreated
+        assert index_path.exists()
+
+        # And lookup should work
+        result = storage.get_interaction_by_object_id(
+            "https://mastodon.social/users/alice/statuses/123"
+        )
+        assert result is not None
+        assert result.source_actor_id == "https://mastodon.social/users/alice"
+
+    def test_migration_skips_if_already_current(self, tmp_path):
+        from pubby.storage.adapters.file._storage import SCHEMA_VERSION
+
+        # Create storage (runs migration)
+        storage = FileActivityPubStorage(data_dir=tmp_path)
+        assert storage._get_schema_version() == SCHEMA_VERSION
+
+        # Create another instance - should not re-run migration
+        storage2 = FileActivityPubStorage(data_dir=tmp_path)
+        assert storage2._get_schema_version() == SCHEMA_VERSION

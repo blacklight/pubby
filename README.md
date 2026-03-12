@@ -417,6 +417,14 @@ storage = FileActivityPubStorage(data_dir="/var/lib/myapp/activitypub")
 Data is stored as JSON files in a structured directory layout, with
 thread-safe access via `RLock` per resource.
 
+**Automatic schema migrations**: On initialization, the storage checks a
+`.schema_version` file and automatically runs any pending migrations
+(e.g., rebuilding indexes). To disable this:
+
+```python
+storage = FileActivityPubStorage(data_dir="...", auto_migrate=False)
+```
+
 ## Configuration Reference
 
 ### `ActivityPubHandler` Parameters

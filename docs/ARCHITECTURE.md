@@ -311,6 +311,11 @@ setups that don't need a database.
 - **`_object_ids/`** — maps remote object URLs to their interactions,
   enabling `get_interaction_by_object_id()` without a full directory scan.
 
+**Schema versioning**: A `.schema_version` file tracks the storage format.
+On initialization, `FileActivityPubStorage` checks this version and
+automatically runs any pending migrations (e.g., rebuilding indexes).
+Pass `auto_migrate=False` to disable.
+
 ### 8. Render — `pubby.render`
 
 `InteractionsRenderer` uses Jinja2 (`PackageLoader` on the `templates/`

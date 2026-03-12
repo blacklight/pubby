@@ -38,6 +38,11 @@ from ..._base import ActivityPubStorage
 
 logger = logging.getLogger(__name__)
 
+# Schema version history:
+# 1: Initial version (no version file = version 0)
+# 2: Added _object_ids/ index for get_interaction_by_object_id()
+SCHEMA_VERSION = 2
+
 
 def _sanitize(value: str) -> str:
     """Create a filesystem-safe name from a URL or ID."""
@@ -58,10 +63,72 @@ class FileActivityPubStorage(ActivityPubStorage):
     :param data_dir: Root directory for storing data.
     """
 
-    def __init__(self, data_dir: str | Path):
+    def __init__(self, data_dir: str | Path, *, auto_migrate: bool = True):
         self.data_dir = Path(data_dir)
         self._locks: dict[str, threading.RLock] = {}
         self._global_lock = threading.RLock()
+
+        if auto_migrate:
+            self._run_migrations()
+
+    # ---------- Schema versioning ----------
+
+    @property
+    def _version_path(self) -> Path:
+        return self.data_dir / ".schema_version"
+
+    def _get_schema_version(self) -> int:
+        """Get the current schema version from the version file."""
+        if not self._version_path.exists():
+            return 0
+        try:
+            return int(self._version_path.read_text().strip())
+        except (ValueError, OSError):
+            return 0
+
+    def _set_schema_version(self, version: int) -> None:
+        """Write the schema version to the version file."""
+        self._version_path.parent.mkdir(parents=True, exist_ok=True)
+        self._version_path.write_text(str(version))
+
+    def _run_migrations(self) -> None:
+        """Run any pending migrations to bring schema up to date."""
+        current = self._get_schema_version()
+        if current >= SCHEMA_VERSION:
+            return
+
+        logger.info(
+            "Migrating file storage schema from version %d to %d",
+            current,
+            SCHEMA_VERSION,
+        )
+
+        # Migration registry: version -> migration function
+        migrations = {
+            2: self._migrate_to_v2_object_id_index,
+        }
+
+        for version in range(current + 1, SCHEMA_VERSION + 1):
+            if version in migrations:
+                logger.info("Running migration to version %d", version)
+                migrations[version]()
+
+        self._set_schema_version(SCHEMA_VERSION)
+        logger.info("Migration complete")
+
+    def _migrate_to_v2_object_id_index(self) -> None:
+        """Migrate to v2: backfill object_id index."""
+        from ..._migrations import _get_all_file_interactions
+
+        interactions = _get_all_file_interactions(self)
+        indexed = 0
+
+        for interaction in interactions:
+            if interaction.object_id:
+                self._update_object_id_index(interaction, add=True)
+                indexed += 1
+
+        logger.info("Indexed %d interactions by object_id", indexed)
 
     def _get_lock(self, path: str) -> threading.RLock:
         """Get or create an RLock for a given path."""
