@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+- Added `ActivityPubStorage.get_interaction_by_object_id(object_id,
+  status=CONFIRMED)` to look up interactions by remote object URL.
+- Implemented efficient object-id lookup in both adapters:
+  - DB: indexed query on `object_id` + `status`
+  - File: new `interactions/_object_ids/` index for O(1) lookups
+- Added file-storage tests covering object-id lookup and status filtering.
+
+### Changed
+- File storage `delete_interaction_by_object_id()` now uses the `_object_ids/` index instead of scanning the whole interactions directory.
+- Updated README and architecture docs to document the new API and file index layout.
+- Refined contributor/agent execution style guidance in `AGENTS.md`.
+
 ## 0.2.11
 
 ### Docs
