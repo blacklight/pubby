@@ -57,8 +57,8 @@ class OutboxProcessor:
         actor_id: str,
         private_key: object,
         key_id: str,
-        followers_collection_url: str = "",
         *,
+        followers_collection_url: str = "",
         max_retries: int = 3,
         retry_base_delay: float = 10.0,
         max_delivery_workers: int = 10,
@@ -163,6 +163,99 @@ class OutboxProcessor:
 
         return activity
 
+    def build_like_activity(
+        self,
+        object_url: str,
+        *,
+        activity_id: str | None = None,
+        published: datetime | None = None,
+    ) -> dict:
+        """
+        Build a Like activity targeting a remote object.
+
+        :param object_url: The URL of the object being liked.
+        :param activity_id: Optional explicit activity ID. If not provided,
+            a new unique ID is generated.
+        :param published: Optional publication timestamp. Defaults to now.
+        :return: The activity as a JSON-LD dictionary.
+        """
+        activity_id = activity_id or self._new_activity_id()
+        now = (published or datetime.now(timezone.utc)).isoformat()
+
+        activity = {
+            "@context": AP_CONTEXT,
+            "id": activity_id,
+            "type": "Like",
+            "actor": self.actor_id,
+            "published": now,
+            "object": object_url,
+            "to": [AS_PUBLIC],
+            "cc": (
+                [self.followers_collection_url] if self.followers_collection_url else []
+            ),
+        }
+
+        return activity
+
+    def build_announce_activity(
+        self,
+        object_url: str,
+        *,
+        activity_id: str | None = None,
+        published: datetime | None = None,
+    ) -> dict:
+        """
+        Build an Announce (boost) activity targeting a remote object.
+
+        :param object_url: The URL of the object being boosted.
+        :param activity_id: Optional explicit activity ID. If not provided,
+            a new unique ID is generated.
+        :param published: Optional publication timestamp. Defaults to now.
+        :return: The activity as a JSON-LD dictionary.
+        """
+        activity_id = activity_id or self._new_activity_id()
+        now = (published or datetime.now(timezone.utc)).isoformat()
+        activity = {
+            "@context": AP_CONTEXT,
+            "id": activity_id,
+            "type": "Announce",
+            "actor": self.actor_id,
+            "published": now,
+            "object": object_url,
+            "to": [AS_PUBLIC],
+            "cc": (
+                [self.followers_collection_url] if self.followers_collection_url else []
+            ),
+        }
+
+        return activity
+
+    def build_undo_activity(self, inner_activity: dict) -> dict:
+        """
+        Build an Undo activity wrapping another activity.
+
+        This is intentionally generic: it works for ``Undo Like``,
+        ``Undo Announce``, ``Undo Follow``, etc.
+
+        :param inner_activity: The activity to undo (must contain at least
+            ``id``, ``type``, ``actor``, and ``object``).
+        :return: The Undo activity as a JSON-LD dictionary.
+        """
+        activity_id = self._new_activity_id()
+        now = datetime.now(timezone.utc).isoformat()
+        activity = {
+            "@context": AP_CONTEXT,
+            "id": activity_id,
+            "type": "Undo",
+            "actor": self.actor_id,
+            "published": now,
+            "object": inner_activity,
+            "to": inner_activity.get("to", [AS_PUBLIC]),
+            "cc": inner_activity.get("cc", []),
+        }
+
+        return activity
+
     def publish(self, activity: dict) -> dict:
         """
         Publish an activity: store in outbox and fan-out to followers and
@@ -182,9 +275,20 @@ class OutboxProcessor:
         # Collect follower inboxes
         followers = self.storage.get_followers()
         follower_inboxes = self._collect_inboxes(followers)
+        logger.debug(
+            "Collected %d follower inboxes for activity %s",
+            len(follower_inboxes),
+            activity_id,
+        )
 
         # Collect recipient inboxes (mentioned actors, etc.)
         recipient_inboxes = self._collect_recipient_inboxes(activity)
+        logger.debug(
+            "Collected %d recipient inboxes for activity %s: %s",
+            len(recipient_inboxes),
+            activity_id,
+            recipient_inboxes,
+        )
 
         # Merge and deduplicate
         seen: set[str] = set(follower_inboxes)
@@ -193,6 +297,12 @@ class OutboxProcessor:
             if inbox not in seen:
                 seen.add(inbox)
                 inboxes.append(inbox)
+
+        logger.info(
+            "Delivering activity %s to %d inboxes",
+            activity_id,
+            len(inboxes),
+        )
 
         # Fan-out delivery (concurrent)
         with ThreadPoolExecutor(
@@ -328,17 +438,24 @@ class OutboxProcessor:
         :return: List of inbox URLs.
         """
         actor_urls = self._extract_recipient_actors(activity)
+        logger.debug("Extracted recipient actor URLs: %s", actor_urls)
         inboxes: list[str] = []
         seen: set[str] = set()
 
         for actor_url in actor_urls:
             actor_data = self._fetch_actor(actor_url)
             if not actor_data:
+                logger.debug("Failed to fetch actor data for %s", actor_url)
                 continue
 
             actor = Actor.build(actor_data)
             # Prefer shared inbox to reduce delivery requests
             inbox = actor.endpoints.get("sharedInbox") or actor.inbox
+            logger.debug(
+                "Actor %s resolved to inbox %s",
+                actor_url,
+                inbox,
+            )
             if inbox and inbox not in seen:
                 seen.add(inbox)
                 inboxes.append(inbox)

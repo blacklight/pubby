@@ -50,6 +50,7 @@
     - [`extract_mentions(text, *, timeout=10) -> list\[Mention\]`](#extract_mentionstext--timeout10---listmention)
   - [Publishing](#publishing)
     - [`handler.publish_object(obj, activity_type="Create")`](#handlerpublish_objectobj-activity_typecreate)
+    - [`handler.publish_activity(activity)`](#handlerpublish_activityactivity)
     - [`handler.publish_actor_update()`](#handlerpublish_actor_update)
   - [Storage](#storage)
     - [`ActivityPubStorage`](#activitypubstorage)
@@ -769,6 +770,39 @@ handler.publish_object(article)                              # Create
 handler.publish_object(updated_article, activity_type="Update")
 handler.publish_object(deleted_article, activity_type="Delete")
 ```
+
+#### `handler.publish_activity(activity)`
+
+Publish a pre-built activity dict as-is, without wrapping it in a
+Create/Update envelope. Use this for activity types that are not Object
+wrappers — `Like`, `Announce`, `Undo`, `Follow`, etc.
+
+The `OutboxProcessor` provides builders for common activity types:
+
+```python
+# Like a remote post
+like = handler.outbox.build_like_activity("https://remote.example.com/post/42")
+handler.publish_activity(like)
+
+# Boost (Announce) a remote post
+boost = handler.outbox.build_announce_activity("https://remote.example.com/post/42")
+handler.publish_activity(boost)
+
+# Undo the like
+undo = handler.outbox.build_undo_activity(like)
+handler.publish_activity(undo)
+```
+
+Available builders on `handler.outbox`:
+
+| Builder | Returns |
+|---|---|
+| `build_like_activity(object_url, *, activity_id=None, published=None)` | `Like` activity dict |
+| `build_announce_activity(object_url, *, activity_id=None, published=None)` | `Announce` (boost) activity dict |
+| `build_undo_activity(inner_activity)` | `Undo` activity dict wrapping any activity |
+
+`build_undo_activity` is intentionally generic — it works for
+`Undo Like`, `Undo Announce`, `Undo Follow`, etc.
 
 #### `handler.publish_actor_update()`
 

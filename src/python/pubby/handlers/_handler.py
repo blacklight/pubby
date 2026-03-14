@@ -214,6 +214,21 @@ class ActivityPubHandler:
 
         return self.outbox.publish(activity)
 
+    def publish_activity(self, activity: dict) -> dict:
+        """
+        Publish a pre-built activity to followers.
+
+        Unlike :meth:`publish_object`, this method does not wrap the
+        payload in a Create/Update envelope — it publishes the activity
+        dict as-is. Use this for activity types that are not Object
+        wrappers, such as ``Like``, ``Announce``, ``Undo``, and
+        ``Follow``.
+
+        :param activity: A complete JSON-LD activity dictionary.
+        :return: The published activity dictionary.
+        """
+        return self.outbox.publish(activity)
+
     def get_outbox(self, limit: int = 20, offset: int = 0) -> dict:
         """
         Get the outbox collection.

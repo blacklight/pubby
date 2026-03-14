@@ -73,6 +73,134 @@ class TestBuildActivities:
         assert activity["object"]["type"] == "Tombstone"
         assert activity["object"]["id"] == "https://blog.example.com/post/1"
 
+    def test_build_like_activity(self, outbox_processor):
+        activity = outbox_processor.build_like_activity(
+            "https://remote.example.com/post/42"
+        )
+        assert activity["type"] == "Like"
+        assert activity["actor"] == "https://blog.example.com/ap/actor"
+        assert activity["object"] == "https://remote.example.com/post/42"
+        assert AS_PUBLIC in activity["to"]
+        assert "https://blog.example.com/ap/followers" in activity["cc"]
+        assert "published" in activity
+        assert "id" in activity
+
+    def test_build_like_activity_with_explicit_id(self, outbox_processor):
+        activity = outbox_processor.build_like_activity(
+            "https://remote.example.com/post/42",
+            activity_id="https://blog.example.com/reply/my-like#like",
+        )
+        assert activity["id"] == "https://blog.example.com/reply/my-like#like"
+
+    def test_build_like_activity_with_published(self, outbox_processor):
+        ts = datetime(2025, 3, 14, 12, 0, 0, tzinfo=timezone.utc)
+        activity = outbox_processor.build_like_activity(
+            "https://remote.example.com/post/42",
+            published=ts,
+        )
+        assert activity["published"] == ts.isoformat()
+
+    def test_build_like_activity_no_followers_url(self, mock_storage, private_key):
+        processor = OutboxProcessor(
+            storage=mock_storage,
+            actor_id="https://blog.example.com/ap/actor",
+            private_key=private_key,
+            key_id="https://blog.example.com/ap/actor#main-key",
+            followers_collection_url="",
+        )
+        activity = processor.build_like_activity("https://remote.example.com/post/1")
+        assert activity["cc"] == []
+
+    def test_build_undo_activity(self, outbox_processor):
+        like = outbox_processor.build_like_activity(
+            "https://remote.example.com/post/42"
+        )
+        undo = outbox_processor.build_undo_activity(like)
+
+        assert undo["type"] == "Undo"
+        assert undo["actor"] == "https://blog.example.com/ap/actor"
+        assert undo["object"] is like
+        assert undo["to"] == like["to"]
+        assert undo["cc"] == like["cc"]
+        assert "published" in undo
+        assert undo["id"] != like["id"]
+
+    def test_build_undo_activity_inherits_addressing(self, outbox_processor):
+        inner = {
+            "id": "https://blog.example.com/activities/123",
+            "type": "Like",
+            "actor": "https://blog.example.com/ap/actor",
+            "object": "https://remote.example.com/post/1",
+            "to": ["https://specific.example.com/users/alice"],
+            "cc": ["https://blog.example.com/ap/followers"],
+        }
+        undo = outbox_processor.build_undo_activity(inner)
+        assert undo["to"] == ["https://specific.example.com/users/alice"]
+        assert undo["cc"] == ["https://blog.example.com/ap/followers"]
+
+    def test_build_undo_activity_defaults_addressing(self, outbox_processor):
+        inner = {
+            "id": "https://blog.example.com/activities/123",
+            "type": "Like",
+            "actor": "https://blog.example.com/ap/actor",
+            "object": "https://remote.example.com/post/1",
+        }
+        undo = outbox_processor.build_undo_activity(inner)
+        assert AS_PUBLIC in undo["to"]
+        assert undo["cc"] == []
+
+    def test_build_announce_activity(self, outbox_processor):
+        activity = outbox_processor.build_announce_activity(
+            "https://remote.example.com/post/42"
+        )
+        assert activity["type"] == "Announce"
+        assert activity["actor"] == "https://blog.example.com/ap/actor"
+        assert activity["object"] == "https://remote.example.com/post/42"
+        assert AS_PUBLIC in activity["to"]
+        assert "https://blog.example.com/ap/followers" in activity["cc"]
+        assert "published" in activity
+        assert "id" in activity
+
+    def test_build_announce_activity_with_explicit_id(self, outbox_processor):
+        activity = outbox_processor.build_announce_activity(
+            "https://remote.example.com/post/42",
+            activity_id="https://blog.example.com/reply/my-boost#boost",
+        )
+        assert activity["id"] == "https://blog.example.com/reply/my-boost#boost"
+
+    def test_build_announce_activity_with_published(self, outbox_processor):
+        ts = datetime(2025, 3, 14, 12, 0, 0, tzinfo=timezone.utc)
+        activity = outbox_processor.build_announce_activity(
+            "https://remote.example.com/post/42",
+            published=ts,
+        )
+        assert activity["published"] == ts.isoformat()
+
+    def test_build_announce_activity_no_followers_url(self, mock_storage, private_key):
+        processor = OutboxProcessor(
+            storage=mock_storage,
+            actor_id="https://blog.example.com/ap/actor",
+            private_key=private_key,
+            key_id="https://blog.example.com/ap/actor#main-key",
+            followers_collection_url="",
+        )
+        activity = processor.build_announce_activity(
+            "https://remote.example.com/post/1"
+        )
+        assert activity["cc"] == []
+
+    def test_build_undo_announce_activity(self, outbox_processor):
+        boost = outbox_processor.build_announce_activity(
+            "https://remote.example.com/post/42"
+        )
+        undo = outbox_processor.build_undo_activity(boost)
+
+        assert undo["type"] == "Undo"
+        assert undo["object"] is boost
+        assert undo["object"]["type"] == "Announce"
+        assert undo["to"] == boost["to"]
+        assert undo["cc"] == boost["cc"]
+
 
 class TestCollectInboxes:
     def test_shared_inbox_dedup(self, outbox_processor):
@@ -277,7 +405,7 @@ class TestConcurrentDelivery:
             for i in range(num_followers)
         ]
 
-        def slow_post(*args, **kwargs):
+        def slow_post(*_, **__):
             time.sleep(sleep_per_delivery)
             resp = MagicMock()
             resp.status_code = 202
@@ -457,7 +585,7 @@ class TestMentionDelivery:
         # Set up mentioned actor fetch
         mock_storage.get_cached_actor.return_value = None
 
-        def mock_get(url, **kwargs):
+        def mock_get(url, **_):
             resp = MagicMock()
             if "alice" in url:
                 resp.status_code = 200
@@ -470,7 +598,7 @@ class TestMentionDelivery:
                 resp.status_code = 404
             return resp
 
-        def mock_post(url, **kwargs):
+        def mock_post(*_, **__):
             resp = MagicMock()
             resp.status_code = 202
             return resp
@@ -540,3 +668,75 @@ class TestMentionDelivery:
 
         # Should only deliver once (deduplicated)
         assert mock_requests.post.call_count == 1
+
+
+class TestPublishActivity:
+    """Tests for ActivityPubHandler.publish_activity (pass-through to outbox)."""
+
+    def test_publish_activity_delegates_to_outbox(self):
+        """publish_activity should store and deliver without wrapping."""
+        from pubby.handlers._handler import ActivityPubHandler
+
+        handler = MagicMock(spec=ActivityPubHandler)
+        handler.outbox = MagicMock()
+        handler.outbox.publish.return_value = {"id": "act-1", "type": "Like"}
+
+        # Call the real method on the mock
+        result = ActivityPubHandler.publish_activity(
+            handler, {"id": "act-1", "type": "Like"}
+        )
+
+        handler.outbox.publish.assert_called_once_with({"id": "act-1", "type": "Like"})
+        assert result["type"] == "Like"
+
+    @patch("pubby.handlers._outbox.requests")
+    def test_publish_like_via_handler(
+        self, mock_requests, outbox_processor, mock_storage
+    ):
+        """End-to-end: build a Like, publish it, verify delivery."""
+        mock_storage.get_followers.return_value = [
+            Follower(
+                actor_id="https://remote.example.com/users/alice",
+                inbox="https://remote.example.com/users/alice/inbox",
+            ),
+        ]
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 202
+        mock_requests.post.return_value = mock_resp
+
+        like = outbox_processor.build_like_activity(
+            "https://remote.example.com/post/42"
+        )
+        result = outbox_processor.publish(like)
+
+        assert result["type"] == "Like"
+        mock_storage.store_activity.assert_called_once()
+        mock_requests.post.assert_called_once()
+
+    @patch("pubby.handlers._outbox.requests")
+    def test_publish_undo_like_via_handler(
+        self, mock_requests, outbox_processor, mock_storage
+    ):
+        """End-to-end: build an Undo Like, publish it, verify delivery."""
+        mock_storage.get_followers.return_value = [
+            Follower(
+                actor_id="https://remote.example.com/users/alice",
+                inbox="https://remote.example.com/users/alice/inbox",
+            ),
+        ]
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 202
+        mock_requests.post.return_value = mock_resp
+
+        like = outbox_processor.build_like_activity(
+            "https://remote.example.com/post/42"
+        )
+        undo = outbox_processor.build_undo_activity(like)
+        result = outbox_processor.publish(undo)
+
+        assert result["type"] == "Undo"
+        assert result["object"]["type"] == "Like"
+        mock_storage.store_activity.assert_called()
+        mock_requests.post.assert_called()

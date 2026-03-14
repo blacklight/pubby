@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+- `OutboxProcessor.build_like_activity(object_url, *, activity_id=None,
+  published=None)` — build an outbound `Like` activity.
+- `OutboxProcessor.build_announce_activity(object_url, *, activity_id=None,
+  published=None)` — build an outbound `Announce` (boost) activity.
+- `OutboxProcessor.build_undo_activity(inner_activity)` — wrap any activity
+  in an `Undo` envelope (works for Like, Announce, Follow, etc.).
+- `ActivityPubHandler.publish_activity(activity)` — publish a pre-built
+  activity dict without Create/Update wrapping, for activity types like
+  `Like`, `Announce`, `Undo`, and `Follow`.
+
 ## 0.2.14
 
 ### Added

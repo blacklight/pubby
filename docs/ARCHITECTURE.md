@@ -182,6 +182,7 @@ Public methods:
 |--------|-------------|
 | `process_inbox_activity()` | Delegate an incoming activity to `InboxProcessor`. |
 | `publish_object(obj, activity_type)` | Build a Create / Update / Delete activity and fan-out via `OutboxProcessor`. |
+| `publish_activity(activity)` | Publish a pre-built activity dict as-is (Like, Undo, Announce, Follow, etc.). |
 | `publish_actor_update()` | Push the current actor profile to all followers. |
 | `get_actor_document()` | Build the actor's JSON-LD representation. |
 | `get_outbox()` | Return the outbox `OrderedCollection`. |
@@ -222,7 +223,9 @@ interaction is stored, enabling application-level notifications.
 Responsible for:
 
 1. **Building activities** — `build_create_activity()`,
-   `build_update_activity()`, `build_delete_activity()`.
+   `build_update_activity()`, `build_delete_activity()`,
+   `build_like_activity()`, `build_announce_activity()`,
+   `build_undo_activity()`.
 2. **Publishing** — `publish(activity)` stores the activity, collects
    follower inboxes (preferring shared inboxes for deduplication), then
    fans out delivery concurrently via `ThreadPoolExecutor`.
