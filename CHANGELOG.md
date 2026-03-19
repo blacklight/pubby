@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 0.2.17
 
 ### Fixed
 - Signed outgoing **GET** requests when fetching remote actors in
