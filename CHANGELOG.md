@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+- Signed outgoing **GET** requests when fetching remote actors in
+  **InboxProcessor** and **OutboxProcessor**, preventing `401 Unauthorized`
+  responses from instances that require HTTP Signatures.
+- Extended test coverage to ensure `sign_request` is invoked for actor fetches
+  and that signed headers (`Signature`, `Date`, `Host`, etc.) are included in
+  the request.
+
 ## 0.2.16
 
 ### Added
