@@ -890,7 +890,7 @@ class TestFetchActorGone:
     @patch("pubby.handlers._inbox.requests")
     @patch("pubby.handlers._inbox.logger")
     def test_fetch_actor_410_logs_debug_not_warning(
-        self, mock_logger, mock_requests, inbox_processor, mock_storage
+        self, mock_logger, mock_requests, inbox_processor
     ):
         """410 Gone should log at DEBUG level, not WARNING."""
         import requests as real_requests
@@ -914,7 +914,7 @@ class TestFetchActorGone:
     @patch("pubby.handlers._inbox.requests")
     @patch("pubby.handlers._inbox.logger")
     def test_fetch_actor_other_http_error_logs_warning(
-        self, mock_logger, mock_requests, inbox_processor, mock_storage
+        self, mock_logger, mock_requests, inbox_processor
     ):
         """Non-410 HTTP errors should still log WARNING with traceback."""
         import requests as real_requests
@@ -934,6 +934,66 @@ class TestFetchActorGone:
         assert result is None
         mock_logger.warning.assert_called_once()
         mock_logger.debug.assert_not_called()
+
+
+class TestFetchActorSignedRequest:
+    """Tests for _fetch_actor using HTTP Signatures on GET requests."""
+
+    @patch("pubby.handlers._inbox.sign_request")
+    @patch("pubby.handlers._inbox.requests")
+    def test_fetch_actor_signs_get_request(
+        self, mock_requests, mock_sign_request, inbox_processor
+    ):
+        """_fetch_actor should sign the GET request for authorized fetch."""
+        actor_id = "https://remote.example.com/users/alice"
+
+        mock_sign_request.return_value = {
+            "Signature": "sig",
+            "Date": "now",
+            "Host": "remote.example.com",
+            "Accept": "application/activity+json, application/ld+json",
+        }
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"id": actor_id, "type": "Person"}
+        mock_requests.get.return_value = mock_resp
+
+        result = inbox_processor._fetch_actor(actor_id)
+
+        assert result is not None
+        mock_sign_request.assert_called_once()
+        kwargs = mock_sign_request.call_args.kwargs
+        assert kwargs["method"] == "GET"
+        assert kwargs["url"] == actor_id
+        assert "Accept" in kwargs["headers"]
+
+    @patch("pubby.handlers._inbox.sign_request")
+    @patch("pubby.handlers._inbox.requests")
+    def test_fetch_actor_includes_signed_headers(
+        self, mock_requests, mock_sign_request, inbox_processor
+    ):
+        """Signed headers should be included in the GET request."""
+        actor_id = "https://remote.example.com/users/alice"
+
+        mock_sign_request.return_value = {
+            "Signature": "test-sig",
+            "Date": "Wed, 01 Jan 2025 00:00:00 GMT",
+            "Host": "remote.example.com",
+            "Accept": "application/activity+json, application/ld+json",
+        }
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"id": actor_id, "type": "Person"}
+        mock_requests.get.return_value = mock_resp
+
+        inbox_processor._fetch_actor(actor_id)
+
+        call_kwargs = mock_requests.get.call_args.kwargs
+        assert "Signature" in call_kwargs["headers"]
+        assert "Date" in call_kwargs["headers"]
+        assert "Host" in call_kwargs["headers"]
 
 
 class TestStoreLocalOnly:

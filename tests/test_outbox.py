@@ -742,3 +742,65 @@ class TestPublishActivity:
         assert result["object"]["type"] == "Like"
         mock_storage.store_activity.assert_called()
         mock_requests.post.assert_called()
+
+
+class TestFetchActorSignedRequest:
+    """Tests for OutboxProcessor._fetch_actor using HTTP Signatures on GET."""
+
+    @patch("pubby.handlers._outbox.sign_request")
+    @patch("pubby.handlers._outbox.requests")
+    def test_fetch_actor_signs_get_request(
+        self, mock_requests, mock_sign_request, outbox_processor, mock_storage
+    ):
+        """_fetch_actor should sign the GET request for authorized fetch."""
+        actor_url = "https://remote.example.com/users/alice"
+        mock_storage.get_cached_actor.return_value = None
+
+        mock_sign_request.return_value = {
+            "Signature": "sig",
+            "Date": "now",
+            "Host": "remote.example.com",
+            "Accept": "application/activity+json, application/ld+json",
+        }
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"id": actor_url, "type": "Person"}
+        mock_requests.get.return_value = mock_resp
+
+        result = outbox_processor._fetch_actor(actor_url)
+
+        assert result is not None
+        mock_sign_request.assert_called_once()
+        kwargs = mock_sign_request.call_args.kwargs
+        assert kwargs["method"] == "GET"
+        assert kwargs["url"] == actor_url
+        assert "Accept" in kwargs["headers"]
+
+    @patch("pubby.handlers._outbox.sign_request")
+    @patch("pubby.handlers._outbox.requests")
+    def test_fetch_actor_includes_signed_headers(
+        self, mock_requests, mock_sign_request, outbox_processor, mock_storage
+    ):
+        """Signed headers should be included in the GET request."""
+        actor_url = "https://remote.example.com/users/alice"
+        mock_storage.get_cached_actor.return_value = None
+
+        mock_sign_request.return_value = {
+            "Signature": "test-sig",
+            "Date": "Wed, 01 Jan 2025 00:00:00 GMT",
+            "Host": "remote.example.com",
+            "Accept": "application/activity+json, application/ld+json",
+        }
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"id": actor_url, "type": "Person"}
+        mock_requests.get.return_value = mock_resp
+
+        outbox_processor._fetch_actor(actor_url)
+
+        call_kwargs = mock_requests.get.call_args.kwargs
+        assert "Signature" in call_kwargs["headers"]
+        assert "Date" in call_kwargs["headers"]
+        assert "Host" in call_kwargs["headers"]

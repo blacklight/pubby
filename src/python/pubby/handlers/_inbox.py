@@ -98,9 +98,20 @@ class InboxProcessor:
             return cached
 
         try:
+            base_headers = {
+                "Accept": "application/activity+json, application/ld+json",
+            }
+            signed_headers = sign_request(
+                private_key=self.private_key,  # type: ignore
+                key_id=self.key_id,
+                method="GET",
+                url=actor_id,
+                headers=base_headers,
+            )
             resp = requests.get(
                 actor_id,
                 headers={
+                    **signed_headers,
                     "Accept": "application/activity+json, application/ld+json",
                     "User-Agent": self.user_agent,
                 },
