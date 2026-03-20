@@ -672,6 +672,121 @@ class TestMentionDelivery:
         assert mock_requests.post.call_count == 1
 
 
+class TestDirectMessageDelivery:
+    """Tests for direct message (visibility: direct) delivery behavior."""
+
+    def test_is_addressed_to_followers_with_public(self, outbox_processor):
+        """Should return True when AS_PUBLIC is in to."""
+        activity = {"to": [AS_PUBLIC], "cc": []}
+        assert outbox_processor._is_addressed_to_followers(activity) is True
+
+    def test_is_addressed_to_followers_with_followers_url(self, outbox_processor):
+        """Should return True when followers URL is in cc."""
+        activity = {
+            "to": [AS_PUBLIC],
+            "cc": ["https://blog.example.com/ap/followers"],
+        }
+        assert outbox_processor._is_addressed_to_followers(activity) is True
+
+    def test_is_addressed_to_followers_direct_message(self, outbox_processor):
+        """Should return False for direct messages (no public, no followers)."""
+        activity = {
+            "to": ["https://mastodon.social/users/alice"],
+            "cc": [],
+        }
+        assert outbox_processor._is_addressed_to_followers(activity) is False
+
+    def test_is_addressed_to_followers_handles_string_values(self, outbox_processor):
+        """Should handle to/cc being single strings instead of lists."""
+        activity = {
+            "to": AS_PUBLIC,
+            "cc": "https://blog.example.com/ap/followers",
+        }
+        assert outbox_processor._is_addressed_to_followers(activity) is True
+
+    @patch("pubby.handlers._outbox.requests")
+    def test_direct_message_skips_follower_inboxes(
+        self, mock_requests, outbox_processor, mock_storage
+    ):
+        """Direct messages should NOT be delivered to followers, only to recipients."""
+        # Set up followers (should be skipped for direct messages)
+        mock_storage.get_followers.return_value = [
+            Follower(
+                actor_id="https://other.example.com/users/bob",
+                inbox="https://other.example.com/users/bob/inbox",
+            ),
+            Follower(
+                actor_id="https://other.example.com/users/charlie",
+                inbox="https://other.example.com/users/charlie/inbox",
+            ),
+        ]
+
+        # Set up mentioned actor fetch
+        mock_storage.get_cached_actor.return_value = {
+            "id": "https://mastodon.social/users/alice",
+            "type": "Person",
+            "inbox": "https://mastodon.social/users/alice/inbox",
+        }
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 202
+        mock_requests.post.return_value = mock_resp
+
+        # Direct message: only to mentioned actor, no public/followers
+        obj = Object(
+            id="https://blog.example.com/post/dm-1",
+            type="Note",
+            content="<p>Private message to Alice</p>",
+            attributed_to="https://blog.example.com/ap/actor",
+            to=["https://mastodon.social/users/alice"],
+            cc=[],
+        )
+
+        activity = outbox_processor.build_create_activity(obj)
+        outbox_processor.publish(activity)
+
+        # Should only deliver to Alice, NOT to followers bob/charlie
+        assert mock_requests.post.call_count == 1
+        delivered_urls = [call[0][0] for call in mock_requests.post.call_args_list]
+        assert "https://mastodon.social/users/alice/inbox" in delivered_urls
+        assert "https://other.example.com/users/bob/inbox" not in delivered_urls
+        assert "https://other.example.com/users/charlie/inbox" not in delivered_urls
+
+    @patch("pubby.handlers._outbox.requests")
+    def test_unlisted_still_delivers_to_followers(
+        self, mock_requests, outbox_processor, mock_storage
+    ):
+        """Unlisted posts (followers in to, public in cc) should go to followers."""
+        mock_storage.get_followers.return_value = [
+            Follower(
+                actor_id="https://other.example.com/users/bob",
+                inbox="https://other.example.com/users/bob/inbox",
+            ),
+        ]
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 202
+        mock_requests.post.return_value = mock_resp
+
+        # Unlisted: followers in to, public in cc
+        obj = Object(
+            id="https://blog.example.com/post/unlisted-1",
+            type="Note",
+            content="<p>Unlisted post</p>",
+            attributed_to="https://blog.example.com/ap/actor",
+            to=["https://blog.example.com/ap/followers"],
+            cc=[AS_PUBLIC],
+        )
+
+        activity = outbox_processor.build_create_activity(obj)
+        outbox_processor.publish(activity)
+
+        # Should deliver to followers
+        assert mock_requests.post.call_count == 1
+        delivered_urls = [call[0][0] for call in mock_requests.post.call_args_list]
+        assert "https://other.example.com/users/bob/inbox" in delivered_urls
+
+
 class TestPublishActivity:
     """Tests for ActivityPubHandler.publish_activity (pass-through to outbox)."""
 

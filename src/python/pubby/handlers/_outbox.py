@@ -98,18 +98,27 @@ class OutboxProcessor:
         activity_id = self._new_activity_id()
         now = datetime.now(timezone.utc)
 
+        # If addressing is explicitly provided (either to or cc has values),
+        # use it as-is. Otherwise, apply defaults. This preserves empty cc
+        # for direct messages while still defaulting unaddressed posts.
+        has_explicit_addressing = bool(obj.to) or bool(obj.cc)
+        to_field = obj.to if has_explicit_addressing else [AS_PUBLIC]
+        cc_field = (
+            obj.cc
+            if has_explicit_addressing
+            else (
+                [self.followers_collection_url] if self.followers_collection_url else []
+            )
+        )
+
         activity = {
             "@context": AP_CONTEXT,
             "id": activity_id,
             "type": "Create",
             "actor": self.actor_id,
             "published": now.isoformat(),
-            "to": obj.to or [AS_PUBLIC],
-            "cc": (
-                obj.cc or [self.followers_collection_url]
-                if self.followers_collection_url
-                else obj.cc
-            ),
+            "to": to_field,
+            "cc": cc_field,
             "object": obj.to_dict(),
         }
 
@@ -125,18 +134,26 @@ class OutboxProcessor:
         activity_id = self._new_activity_id()
         now = datetime.now(timezone.utc)
 
+        # If addressing is explicitly provided (either to or cc has values),
+        # use it as-is. Otherwise, apply defaults.
+        has_explicit_addressing = bool(obj.to) or bool(obj.cc)
+        to_field = obj.to if has_explicit_addressing else [AS_PUBLIC]
+        cc_field = (
+            obj.cc
+            if has_explicit_addressing
+            else (
+                [self.followers_collection_url] if self.followers_collection_url else []
+            )
+        )
+
         activity = {
             "@context": AP_CONTEXT,
             "id": activity_id,
             "type": "Update",
             "actor": self.actor_id,
             "published": now.isoformat(),
-            "to": obj.to or [AS_PUBLIC],
-            "cc": (
-                obj.cc or [self.followers_collection_url]
-                if self.followers_collection_url
-                else obj.cc
-            ),
+            "to": to_field,
+            "cc": cc_field,
             "object": obj.to_dict(),
         }
 
@@ -279,14 +296,25 @@ class OutboxProcessor:
         activity_id = activity.get("id", self._new_activity_id())
         self.storage.store_activity(activity_id, activity)
 
-        # Collect follower inboxes
-        followers = self.storage.get_followers()
-        follower_inboxes = self._collect_inboxes(followers)
-        logger.debug(
-            "Collected %d follower inboxes for activity %s",
-            len(follower_inboxes),
-            activity_id,
-        )
+        # Check if this activity is addressed to followers
+        # (i.e., followers URL appears in to or cc)
+        addressed_to_followers = self._is_addressed_to_followers(activity)
+
+        # Collect follower inboxes only if addressed to followers
+        if addressed_to_followers:
+            followers = self.storage.get_followers()
+            follower_inboxes = self._collect_inboxes(followers)
+            logger.debug(
+                "Collected %d follower inboxes for activity %s",
+                len(follower_inboxes),
+                activity_id,
+            )
+        else:
+            follower_inboxes = []
+            logger.debug(
+                "Skipping follower inboxes for activity %s (not addressed to followers)",
+                activity_id,
+            )
 
         # Collect recipient inboxes (mentioned actors, etc.)
         recipient_inboxes = self._collect_recipient_inboxes(activity)
@@ -371,6 +399,37 @@ class OutboxProcessor:
                 inboxes.append(inbox)
 
         return inboxes
+
+    def _is_addressed_to_followers(self, activity: dict) -> bool:
+        """
+        Check if an activity is addressed to the followers collection.
+
+        This is used to determine whether to fan out to all followers.
+        Activities that are not addressed to followers (e.g., direct messages)
+        should only be delivered to explicitly mentioned recipients.
+
+        :param activity: The activity dictionary.
+        :return: True if followers collection URL appears in to or cc.
+        """
+        if not self.followers_collection_url:
+            # If no followers collection is configured, assume public activities
+            # should go to followers
+            to_cc = activity.get("to", []) + activity.get("cc", [])
+            return AS_PUBLIC in to_cc
+
+        for field in ("to", "cc"):
+            recipients = activity.get(field, [])
+            if isinstance(recipients, str):
+                recipients = [recipients]
+
+            if self.followers_collection_url in recipients:
+                return True
+
+            # Also check for AS_PUBLIC - public posts should go to followers
+            if AS_PUBLIC in recipients:
+                return True
+
+        return False
 
     def _is_actor_url(self, url: str) -> bool:
         """
