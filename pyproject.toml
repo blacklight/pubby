@@ -1,6 +1,6 @@
 [project]
 name = "pubby"
-version = "0.2.18"
+version = "0.2.19"
 description = "A general-purpose library to add ActivityPub federation support to your website"
 license = "AGPL-3.0-or-later"
 dependencies = [
@@ -48,7 +48,7 @@ where = ["src/python"]
 include = ["pubby*"]
 
 [tool.bumpversion]
-current_version = "0.2.18"
+current_version = "0.2.19"
 commit = true
 tag = true
 

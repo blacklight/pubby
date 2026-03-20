@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## 0.2.19
 
 ### Fixed
 - Outbox now respects explicitly provided `to`/`cc` fields (including
