@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- Inbox processor now rejects malformed activity payloads (e.g., JSON arrays
+  instead of objects) with a proper 400 error instead of crashing.
+
 ## 0.2.19
 
 ### Fixed

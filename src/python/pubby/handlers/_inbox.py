@@ -21,7 +21,7 @@ from .._model import (
     Object,
     AP_CONTEXT,
 )
-from .._exceptions import SignatureVerificationError
+from .._exceptions import ActivityPubError, SignatureVerificationError
 from ..crypto import sign_request, verify_request
 from ..crypto._keys import load_public_key
 from ..storage import ActivityPubStorage
@@ -214,6 +214,9 @@ class InboxProcessor:
         """
         if not skip_verification and headers:
             self.verify_signature(method, path, headers, body)
+
+        if not isinstance(activity_data, dict):
+            raise ActivityPubError("Invalid activity: expected object, got array")
 
         activity = Activity.build(activity_data)
         activity_type_str = activity.type.strip()
