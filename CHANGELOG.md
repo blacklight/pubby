@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+- Outbox now respects explicitly provided `to`/`cc` fields (including
+  preserving an intentionally empty `cc`) and only applies default addressing
+  when posts are unaddressed.
+- Prevented unintended follower inbox fanout for direct messages by only
+  delivering to follower inboxes when the activity targets followers and/or
+  `as:Public`.
+
 ## 0.2.18
 
 ### Fixed
