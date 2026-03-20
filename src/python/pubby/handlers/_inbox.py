@@ -13,6 +13,7 @@ from .._model import (
     Activity,
     ActivityType,
     Actor,
+    AS_PUBLIC,
     Follower,
     Interaction,
     InteractionStatus,
@@ -362,6 +363,25 @@ class InboxProcessor:
         return False
 
     @staticmethod
+    def _is_publicly_addressed(obj_data: dict) -> bool:
+        """
+        Check if an object is addressed to a public audience.
+
+        Returns ``True`` if the ActivityStreams Public collection
+        (``https://www.w3.org/ns/activitystreams#Public``) or one of its
+        common aliases (``Public``, ``as:Public``) appears in the
+        object's ``to`` or ``cc`` fields.
+        """
+        public_ids = {AS_PUBLIC, "Public", "as:Public"}
+        to = obj_data.get("to", [])
+        cc = obj_data.get("cc", [])
+        if isinstance(to, str):
+            to = [to]
+        if isinstance(cc, str):
+            cc = [cc]
+        return bool(public_ids.intersection(to + cc))
+
+    @staticmethod
     def _extract_mentioned_actors(obj_data: dict) -> list[str]:
         """Extract actor URLs from Mention tags in the object data."""
         mentioned = []
@@ -438,7 +458,16 @@ class InboxProcessor:
             self.on_interaction_received(interaction)
 
         mentions_local_actor = self.actor_id in mentioned_actors
-        if self._should_store_interaction(effective_target or "", mentions_local_actor):
+        if not self._is_publicly_addressed(obj_data):
+            logger.debug(
+                "Skipped storing %s from %s on %s (not publicly addressed)",
+                interaction_type.value,
+                activity.actor,
+                effective_target,
+            )
+        elif self._should_store_interaction(
+            effective_target or "", mentions_local_actor
+        ):
             self.storage.store_interaction(interaction)
             logger.info(
                 "Stored %s from %s on %s",

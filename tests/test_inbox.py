@@ -196,6 +196,8 @@ class TestHandleCreate:
                 "attributedTo": actor_id,
                 "inReplyTo": "https://blog.example.com/post/1",
                 "published": "2024-01-01T00:00:00Z",
+                "to": ["https://www.w3.org/ns/activitystreams#Public"],
+                "cc": [f"{actor_id}/followers"],
             },
         }
 
@@ -224,6 +226,157 @@ class TestHandleCreate:
 
         inbox_processor.process(activity, skip_verification=True)
         mock_storage.store_interaction.assert_not_called()
+
+    @patch("pubby.handlers._inbox.requests")
+    def test_private_reply_not_stored(
+        self, mock_requests, inbox_processor, mock_storage
+    ):
+        """A private reply (no public audience) should not be stored."""
+        actor_id = "https://remote.example.com/users/alice"
+        actor_data = _remote_actor_data(actor_id)
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = actor_data
+        mock_resp.raise_for_status = MagicMock()
+        mock_requests.get.return_value = mock_resp
+
+        activity = {
+            "id": f"{actor_id}/activities/create-dm",
+            "type": "Create",
+            "actor": actor_id,
+            "object": {
+                "id": f"{actor_id}/notes/dm1",
+                "type": "Note",
+                "content": "<p>This is a private message</p>",
+                "attributedTo": actor_id,
+                "inReplyTo": "https://blog.example.com/post/1",
+                "to": ["https://blog.example.com/ap/actor"],
+                "cc": [],
+            },
+        }
+
+        inbox_processor.process(activity, skip_verification=True)
+        mock_storage.store_interaction.assert_not_called()
+
+    @patch("pubby.handlers._inbox.requests")
+    def test_private_mention_not_stored(
+        self, mock_requests, inbox_processor, mock_storage
+    ):
+        """A direct mention (no public audience) should not be stored."""
+        actor_id = "https://remote.example.com/users/alice"
+        actor_data = _remote_actor_data(actor_id)
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = actor_data
+        mock_resp.raise_for_status = MagicMock()
+        mock_requests.get.return_value = mock_resp
+
+        activity = {
+            "id": f"{actor_id}/activities/create-dm2",
+            "type": "Create",
+            "actor": actor_id,
+            "to": ["https://blog.example.com/ap/actor"],
+            "object": {
+                "id": f"{actor_id}/notes/dm2",
+                "type": "Note",
+                "content": "<p>Private mention</p>",
+                "attributedTo": actor_id,
+                "to": ["https://blog.example.com/ap/actor"],
+                "cc": [],
+                "tag": [
+                    {
+                        "type": "Mention",
+                        "href": "https://blog.example.com/ap/actor",
+                        "name": "@blog@blog.example.com",
+                    }
+                ],
+            },
+        }
+
+        inbox_processor.process(activity, skip_verification=True)
+        mock_storage.store_interaction.assert_not_called()
+
+    @patch("pubby.handlers._inbox.requests")
+    def test_private_mention_callback_still_invoked(
+        self, mock_requests, mock_storage, private_key
+    ):
+        """on_interaction_received should fire even for private mentions."""
+        callback = MagicMock()
+        processor = InboxProcessor(
+            storage=mock_storage,
+            actor_id="https://blog.example.com/ap/actor",
+            private_key=private_key,
+            key_id="https://blog.example.com/ap/actor#main-key",
+            on_interaction_received=callback,
+        )
+
+        actor_id = "https://remote.example.com/users/alice"
+        actor_data = _remote_actor_data(actor_id)
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = actor_data
+        mock_resp.raise_for_status = MagicMock()
+        mock_requests.get.return_value = mock_resp
+
+        activity = {
+            "id": f"{actor_id}/activities/create-dm3",
+            "type": "Create",
+            "actor": actor_id,
+            "to": ["https://blog.example.com/ap/actor"],
+            "object": {
+                "id": f"{actor_id}/notes/dm3",
+                "type": "Note",
+                "content": "<p>Private DM</p>",
+                "attributedTo": actor_id,
+                "to": ["https://blog.example.com/ap/actor"],
+                "cc": [],
+                "tag": [
+                    {
+                        "type": "Mention",
+                        "href": "https://blog.example.com/ap/actor",
+                    }
+                ],
+            },
+        }
+
+        processor.process(activity, skip_verification=True)
+        callback.assert_called_once()
+        mock_storage.store_interaction.assert_not_called()
+
+    @patch("pubby.handlers._inbox.requests")
+    def test_unlisted_reply_is_stored(
+        self, mock_requests, inbox_processor, mock_storage
+    ):
+        """An unlisted reply (Public in cc) should still be stored."""
+        actor_id = "https://remote.example.com/users/alice"
+        actor_data = _remote_actor_data(actor_id)
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = actor_data
+        mock_resp.raise_for_status = MagicMock()
+        mock_requests.get.return_value = mock_resp
+
+        activity = {
+            "id": f"{actor_id}/activities/create-unlisted",
+            "type": "Create",
+            "actor": actor_id,
+            "object": {
+                "id": f"{actor_id}/notes/unlisted1",
+                "type": "Note",
+                "content": "<p>Unlisted reply</p>",
+                "attributedTo": actor_id,
+                "inReplyTo": "https://blog.example.com/post/1",
+                "to": [f"{actor_id}/followers"],
+                "cc": ["https://www.w3.org/ns/activitystreams#Public"],
+            },
+        }
+
+        inbox_processor.process(activity, skip_verification=True)
+        mock_storage.store_interaction.assert_called_once()
 
 
 class TestHandleQuote:
@@ -254,6 +407,7 @@ class TestHandleQuote:
                 "attributedTo": actor_id,
                 "quoteUrl": "https://blog.example.com/post/1",
                 "published": "2024-01-01T00:00:00Z",
+                "to": ["https://www.w3.org/ns/activitystreams#Public"],
             },
         }
 
@@ -289,6 +443,7 @@ class TestHandleQuote:
                 "content": "<p>Quoting your article</p>",
                 "attributedTo": actor_id,
                 "quoteUrl": "https://blog.example.com/article/test",
+                "to": ["https://www.w3.org/ns/activitystreams#Public"],
             },
         }
 
@@ -321,6 +476,7 @@ class TestHandleQuote:
                 "content": "<p>FEP quote</p>",
                 "attributedTo": actor_id,
                 "quote": "https://blog.example.com/post/2",
+                "to": ["https://www.w3.org/ns/activitystreams#Public"],
             },
         }
 
@@ -355,6 +511,7 @@ class TestHandleQuote:
                 "content": "<p>Misskey quote</p>",
                 "attributedTo": actor_id,
                 "_misskey_quote": "https://blog.example.com/post/3",
+                "to": ["https://www.w3.org/ns/activitystreams#Public"],
             },
         }
 
@@ -390,6 +547,7 @@ class TestHandleQuote:
                 "attributedTo": actor_id,
                 "inReplyTo": "https://blog.example.com/post/1",
                 "quoteUrl": "https://blog.example.com/post/2",
+                "to": ["https://www.w3.org/ns/activitystreams#Public"],
             },
         }
 
@@ -1033,6 +1191,7 @@ class TestStoreLocalOnly:
                 "type": "Note",
                 "content": "Nice post!",
                 "inReplyTo": "https://blog.example.com/posts/1",
+                "to": ["https://www.w3.org/ns/activitystreams#Public"],
             },
         }
 
@@ -1062,6 +1221,7 @@ class TestStoreLocalOnly:
                 "type": "Note",
                 "content": "Nice post!",
                 "inReplyTo": "https://other.example.com/posts/1",
+                "to": ["https://www.w3.org/ns/activitystreams#Public"],
             },
         }
 
@@ -1092,6 +1252,10 @@ class TestStoreLocalOnly:
                 "id": f"{actor_id}/notes/1",
                 "type": "Note",
                 "content": "@blog Hello!",
+                "to": [
+                    "https://www.w3.org/ns/activitystreams#Public",
+                    "https://blog.example.com/ap/actor",
+                ],
                 "tag": [
                     {
                         "type": "Mention",
@@ -1265,6 +1429,7 @@ class TestMentionExtraction:
                 "type": "Note",
                 "content": "Hello @blog @other",
                 "inReplyTo": "https://blog.example.com/posts/1",
+                "to": ["https://www.w3.org/ns/activitystreams#Public"],
                 "tag": [
                     {
                         "type": "Mention",

@@ -138,6 +138,10 @@ def _parse_dt(value: object) -> datetime | None:
     return dt
 
 
+# The ActivityStreams Public collection — objects addressed to this URI
+# (in ``to`` or ``cc``) are considered publicly visible.
+AS_PUBLIC = "https://www.w3.org/ns/activitystreams#Public"
+
 # ---------- Dataclasses ----------
 
 

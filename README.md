@@ -37,6 +37,7 @@
 - [Rendering Interactions](#rendering-interactions)
 - [Rate Limiting](#rate-limiting)
 - [Interaction Callbacks](#interaction-callbacks)
+  - [Private Messages](#private-messages)
 - [API](#api)
   - [Data Model](#data-model)
     - [`ActorConfig`](#actorconfig)
@@ -568,6 +569,19 @@ handler = ActivityPubHandler(
     on_interaction_received=on_interaction,
 )
 ```
+
+### Private Messages
+
+Only **publicly addressed** interactions (those with
+`https://www.w3.org/ns/activitystreams#Public` in `to` or `cc`) are persisted
+to storage. This includes both public and unlisted posts. Private/direct
+messages and followers-only posts are **not stored**, preventing them from
+appearing in public contexts like blog comments.
+
+However, the `on_interaction_received` callback is still invoked for **all**
+interactions, including private ones. This allows applications to send
+notifications (e.g., email alerts) for direct messages without exposing them
+publicly.
 
 ## API
 

@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- **Private interactions filtered**: `Create` activities that are not publicly
+  addressed (i.e., lacking `https://www.w3.org/ns/activitystreams#Public` or
+  its aliases in `to`/`cc`) are no longer stored. This prevents private/direct
+  messages from appearing in public contexts like blog comments or guestbooks.
+  The `on_interaction_received` callback is still invoked for these
+  interactions, allowing notifications to be sent.
+
 ## 0.2.17
 
 ### Fixed
