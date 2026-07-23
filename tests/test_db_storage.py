@@ -424,3 +424,80 @@ class TestMentionIndex:
             "https://blog.example.com/ap/actor"
         )
         assert len(results) == 1
+
+    def test_multiple_replies_from_same_actor(self, storage):
+        """Multiple replies from the same actor to the same target are all stored."""
+        now = datetime.now(timezone.utc)
+        actor = "https://mastodon.social/users/alice"
+        target = "https://blog.example.com/post/1"
+
+        reply1 = Interaction(
+            source_actor_id=actor,
+            target_resource=target,
+            interaction_type=InteractionType.REPLY,
+            object_id="https://mastodon.social/users/alice/statuses/111",
+            content="First reply",
+            created_at=now,
+            updated_at=now,
+        )
+        reply2 = Interaction(
+            source_actor_id=actor,
+            target_resource=target,
+            interaction_type=InteractionType.REPLY,
+            object_id="https://mastodon.social/users/alice/statuses/222",
+            content="Second reply",
+            created_at=now,
+            updated_at=now,
+        )
+        reply3 = Interaction(
+            source_actor_id=actor,
+            target_resource=target,
+            interaction_type=InteractionType.REPLY,
+            object_id="https://mastodon.social/users/alice/statuses/333",
+            content="Third reply",
+            created_at=now,
+            updated_at=now,
+        )
+
+        storage.store_interaction(reply1)
+        storage.store_interaction(reply2)
+        storage.store_interaction(reply3)
+
+        interactions = storage.get_interactions(target_resource=target)
+        assert len(interactions) == 3
+
+        contents = {i.content for i in interactions}
+        assert contents == {"First reply", "Second reply", "Third reply"}
+
+    def test_like_still_one_per_actor(self, storage):
+        """Likes from the same actor to the same target overwrite (one per actor)."""
+        now = datetime.now(timezone.utc)
+        actor = "https://mastodon.social/users/alice"
+        target = "https://blog.example.com/post/1"
+
+        like1 = Interaction(
+            source_actor_id=actor,
+            target_resource=target,
+            interaction_type=InteractionType.LIKE,
+            activity_id="activity1",
+            created_at=now,
+            updated_at=now,
+        )
+        like2 = Interaction(
+            source_actor_id=actor,
+            target_resource=target,
+            interaction_type=InteractionType.LIKE,
+            activity_id="activity2",
+            created_at=now,
+            updated_at=now,
+        )
+
+        storage.store_interaction(like1)
+        storage.store_interaction(like2)
+
+        interactions = storage.get_interactions(
+            target_resource=target, interaction_type=InteractionType.LIKE
+        )
+        # Both likes have object_id="" so they collide on the unique constraint
+        assert len(interactions) == 1
+        assert interactions[0].activity_id == "activity2"

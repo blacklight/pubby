@@ -2,6 +2,38 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- **Multiple replies from the same actor overwritten**: The file storage
+  adapter used `{type}-{actor}.json` as the filename for all interaction types,
+  causing multiple replies (or quotes) from the same actor to the same target
+  to overwrite each other. Only the last reply was retained. Replies and quotes
+  now use `{type}-{object_id}.json` so each reply gets its own file. A schema
+  migration (v3) automatically renames existing files on startup.
+- **Same bug in DB storage**: The unique constraint
+  `(source_actor_id, target_resource, interaction_type)` caused the same
+  one-reply-per-actor behavior via upsert. The constraint now includes
+  `object_id`, allowing multiple replies with distinct object IDs.
+
+#### DB migration (existing databases)
+
+Existing databases require a manual schema migration to replace the unique
+constraint:
+
+```sql
+-- SQLite
+DROP INDEX IF EXISTS uix_actor_resource_type;
+CREATE UNIQUE INDEX uix_actor_resource_type_object
+    ON ap_interactions (source_actor_id, target_resource, interaction_type, object_id);
+
+-- PostgreSQL
+ALTER TABLE ap_interactions DROP CONSTRAINT IF EXISTS uix_actor_resource_type;
+ALTER TABLE ap_interactions ADD CONSTRAINT uix_actor_resource_type_object
+    UNIQUE (source_actor_id, target_resource, interaction_type, object_id);
+```
+
 ## 0.2.20
 
 ### Fixed

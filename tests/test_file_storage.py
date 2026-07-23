@@ -571,3 +571,152 @@ class TestSchemaMigration:
         # Create another instance - should not re-run migration
         storage2 = FileActivityPubStorage(data_dir=tmp_path)
         assert storage2._get_schema_version() == SCHEMA_VERSION
+
+    def test_multiple_replies_from_same_actor(self, tmp_path):
+        """Multiple replies from the same actor to the same target are all stored."""
+        storage = FileActivityPubStorage(data_dir=tmp_path)
+
+        actor = "https://mastodon.social/users/alice"
+        target = "https://blog.example.com/post/1"
+
+        reply1 = Interaction(
+            source_actor_id=actor,
+            target_resource=target,
+            interaction_type=InteractionType.REPLY,
+            object_id="https://mastodon.social/users/alice/statuses/111",
+            content="First reply",
+        )
+        reply2 = Interaction(
+            source_actor_id=actor,
+            target_resource=target,
+            interaction_type=InteractionType.REPLY,
+            object_id="https://mastodon.social/users/alice/statuses/222",
+            content="Second reply",
+        )
+        reply3 = Interaction(
+            source_actor_id=actor,
+            target_resource=target,
+            interaction_type=InteractionType.REPLY,
+            object_id="https://mastodon.social/users/alice/statuses/333",
+            content="Third reply",
+        )
+
+        storage.store_interaction(reply1)
+        storage.store_interaction(reply2)
+        storage.store_interaction(reply3)
+
+        # All three should be retrievable
+        interactions = storage.get_interactions(target_resource=target)
+        assert len(interactions) == 3
+
+        contents = {i.content for i in interactions}
+        assert contents == {"First reply", "Second reply", "Third reply"}
+
+        # Each should be individually retrievable by object_id
+        r1 = storage.get_interaction_by_object_id(reply1.object_id)
+        assert r1 is not None
+        assert r1.content == "First reply"
+
+        r2 = storage.get_interaction_by_object_id(reply2.object_id)
+        assert r2 is not None
+        assert r2.content == "Second reply"
+
+        r3 = storage.get_interaction_by_object_id(reply3.object_id)
+        assert r3 is not None
+        assert r3.content == "Third reply"
+
+    def test_like_still_one_per_actor(self, tmp_path):
+        """Likes from the same actor to the same target overwrite (one per actor)."""
+        storage = FileActivityPubStorage(data_dir=tmp_path)
+
+        actor = "https://mastodon.social/users/alice"
+        target = "https://blog.example.com/post/1"
+
+        like1 = Interaction(
+            source_actor_id=actor,
+            target_resource=target,
+            interaction_type=InteractionType.LIKE,
+            activity_id="https://mastodon.social/users/alice/activity/like1",
+        )
+        like2 = Interaction(
+            source_actor_id=actor,
+            target_resource=target,
+            interaction_type=InteractionType.LIKE,
+            activity_id="https://mastodon.social/users/alice/activity/like2",
+        )
+
+        storage.store_interaction(like1)
+        storage.store_interaction(like2)
+
+        # Only one like should exist (the latest)
+        interactions = storage.get_interactions(
+            target_resource=target, interaction_type=InteractionType.LIKE
+        )
+        assert len(interactions) == 1
+        assert interactions[0].activity_id == like2.activity_id
+
+    def test_delete_interaction_removes_all_replies_from_actor(self, tmp_path):
+        """delete_interaction marks all replies from an actor as deleted."""
+        storage = FileActivityPubStorage(data_dir=tmp_path)
+
+        actor = "https://mastodon.social/users/alice"
+        target = "https://blog.example.com/post/1"
+
+        reply1 = Interaction(
+            source_actor_id=actor,
+            target_resource=target,
+            interaction_type=InteractionType.REPLY,
+            object_id="https://mastodon.social/users/alice/statuses/111",
+            content="First reply",
+        )
+        reply2 = Interaction(
+            source_actor_id=actor,
+            target_resource=target,
+            interaction_type=InteractionType.REPLY,
+            object_id="https://mastodon.social/users/alice/statuses/222",
+            content="Second reply",
+        )
+
+        storage.store_interaction(reply1)
+        storage.store_interaction(reply2)
+
+        # Delete all replies from this actor
+        storage.delete_interaction(actor, target, InteractionType.REPLY)
+
+        # No confirmed interactions should remain
+        interactions = storage.get_interactions(target_resource=target)
+        assert len(interactions) == 0
+
+    def test_delete_interaction_by_object_id_single_reply(self, tmp_path):
+        """delete_interaction_by_object_id only removes the targeted reply."""
+        storage = FileActivityPubStorage(data_dir=tmp_path)
+
+        actor = "https://mastodon.social/users/alice"
+        target = "https://blog.example.com/post/1"
+
+        reply1 = Interaction(
+            source_actor_id=actor,
+            target_resource=target,
+            interaction_type=InteractionType.REPLY,
+            object_id="https://mastodon.social/users/alice/statuses/111",
+            content="First reply",
+        )
+        reply2 = Interaction(
+            source_actor_id=actor,
+            target_resource=target,
+            interaction_type=InteractionType.REPLY,
+            object_id="https://mastodon.social/users/alice/statuses/222",
+            content="Second reply",
+        )
+
+        storage.store_interaction(reply1)
+        storage.store_interaction(reply2)
+
+        # Delete only the first reply
+        result = storage.delete_interaction_by_object_id(actor, reply1.object_id)
+        assert result is True
+
+        # Only the second reply should remain
+        interactions = storage.get_interactions(target_resource=target)
+        assert len(interactions) == 1
+        assert interactions[0].content == "Second reply"

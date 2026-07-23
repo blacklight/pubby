@@ -84,7 +84,8 @@ class DbInteraction:
             "source_actor_id",
             "target_resource",
             "interaction_type",
-            name="uix_actor_resource_type",
+            "object_id",
+            name="uix_actor_resource_type_object",
         ),
     )
 

@@ -172,6 +172,7 @@ class DbActivityPubStorage(ActivityPubStorage):
                     "source_actor_id",
                     "target_resource",
                     "interaction_type",
+                    "object_id",
                 ],
                 update_columns=[
                     "activity_id",

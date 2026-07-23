@@ -8,7 +8,8 @@ Stores data as JSON files organized by type:
     │   └── {sanitized_actor_id}.json
     ├── interactions/
     │   ├── {sanitized_target}/
-    │   │   └── {type}-{sanitized_actor}.json
+    │   │   ├── {type}-{sanitized_actor}.json       (like/boost/mention)
+    │   │   └── {type}-{sanitized_object_id}.json   (reply/quote)
     │   └── _mentions/
     │       └── {sanitized_actor}.json  (reverse index)
     ├── activities/
@@ -41,7 +42,12 @@ logger = logging.getLogger(__name__)
 # Schema version history:
 # 1: Initial version (no version file = version 0)
 # 2: Added _object_ids/ index for get_interaction_by_object_id()
-SCHEMA_VERSION = 2
+# 3: Reply/quote files keyed by object_id to allow multiple per actor
+SCHEMA_VERSION = 3
+
+# Interaction types that allow multiple interactions from the same actor
+# to the same target resource (e.g. multiple replies to the same post).
+_MULTI_INTERACTION_TYPES = frozenset({InteractionType.REPLY, InteractionType.QUOTE})
 
 
 def _sanitize(value: str) -> str:
@@ -106,6 +112,7 @@ class FileActivityPubStorage(ActivityPubStorage):
         # Migration registry: version -> migration function
         migrations = {
             2: self._migrate_to_v2_object_id_index,
+            3: self._migrate_to_v3_multi_reply_files,
         }
 
         for version in range(current + 1, SCHEMA_VERSION + 1):
@@ -129,6 +136,57 @@ class FileActivityPubStorage(ActivityPubStorage):
                 indexed += 1
 
         logger.info("Indexed %d interactions by object_id", indexed)
+
+    def _migrate_to_v3_multi_reply_files(self) -> None:
+        """Migrate to v3: rename reply/quote files to include object_id."""
+        from ..._migrations import _get_all_file_interactions
+
+        interactions = _get_all_file_interactions(self)
+        renamed = 0
+
+        for interaction in interactions:
+            if (
+                interaction.interaction_type not in _MULTI_INTERACTION_TYPES
+                or not interaction.object_id
+            ):
+                continue
+
+            old_path = self._interaction_dir(interaction.target_resource) / (
+                f"{interaction.interaction_type.value}"
+                f"-{_sanitize(interaction.source_actor_id)}.json"
+            )
+            new_path = self._interaction_path(
+                interaction.source_actor_id,
+                interaction.target_resource,
+                interaction.interaction_type,
+                object_id=interaction.object_id,
+            )
+
+            if old_path == new_path:
+                continue
+
+            if old_path.exists():
+                # Read the data from the old file — it may contain a
+                # different (newer) interaction if multiple replies existed
+                data = self.read_json(old_path)
+                if data and data.get("object_id") == interaction.object_id:
+                    # This file belongs to this interaction; rename it
+                    new_path.parent.mkdir(parents=True, exist_ok=True)
+                    old_path.rename(new_path)
+                    renamed += 1
+                else:
+                    # The file contains a different interaction; write
+                    # this one to the new path from the object_id index
+                    new_path.parent.mkdir(parents=True, exist_ok=True)
+                    self.write_json(new_path, interaction.to_dict())
+                    renamed += 1
+            elif not new_path.exists():
+                # Old file gone but we have the interaction data; write it
+                new_path.parent.mkdir(parents=True, exist_ok=True)
+                self.write_json(new_path, interaction.to_dict())
+                renamed += 1
+
+        logger.info("Renamed/created %d reply/quote files with object_id key", renamed)
 
     def _get_lock(self, path: str) -> threading.RLock:
         """Get or create an RLock for a given path."""
@@ -208,9 +266,14 @@ class FileActivityPubStorage(ActivityPubStorage):
         source_actor_id: str,
         target_resource: str,
         interaction_type: InteractionType,
+        object_id: str | None = None,
     ) -> Path:
         dirname = self._interaction_dir(target_resource)
-        filename = f"{interaction_type.value}-{_sanitize(source_actor_id)}.json"
+        if object_id and interaction_type in _MULTI_INTERACTION_TYPES:
+            # Use object_id as the unique key for reply/quote types
+            filename = f"{interaction_type.value}-{_sanitize(object_id)}.json"
+        else:
+            filename = f"{interaction_type.value}-{_sanitize(source_actor_id)}.json"
         return dirname / filename
 
     def store_interaction(self, interaction: Interaction):
@@ -218,6 +281,7 @@ class FileActivityPubStorage(ActivityPubStorage):
             interaction.source_actor_id,
             interaction.target_resource,
             interaction.interaction_type,
+            object_id=interaction.object_id,
         )
         self.write_json(path, interaction.to_dict())
 
@@ -238,21 +302,44 @@ class FileActivityPubStorage(ActivityPubStorage):
         path = self._interaction_path(
             source_actor_id, target_resource, interaction_type
         )
-        # Mark as deleted rather than removing the file
-        data = self.read_json(path)
-        if data is not None:
-            interaction = Interaction.build(data)
 
-            # Remove from mention index before marking deleted
-            if interaction.mentioned_actors:
-                self._update_mention_index(interaction, add=False)
+        paths_to_delete = []
+        if path.exists():
+            paths_to_delete.append(path)
 
-            # Note: We keep the object_id index for deleted interactions
-            # so they can still be looked up with status=DELETED
+        # For multi-interaction types, also scan the directory for files
+        # from this actor (they are keyed by object_id, not actor).
+        if interaction_type in _MULTI_INTERACTION_TYPES:
+            interaction_dir = self._interaction_dir(target_resource)
+            prefix = f"{interaction_type.value}-"
+            if interaction_dir.exists():
+                for fpath in interaction_dir.glob(f"{prefix}*.json"):
+                    if fpath in paths_to_delete:
+                        continue
+                    data = self.read_json(fpath)
+                    if (
+                        data
+                        and data.get("source_actor_id") == source_actor_id
+                        and data.get("status") != InteractionStatus.DELETED.value
+                    ):
+                        paths_to_delete.append(fpath)
 
-            data["status"] = InteractionStatus.DELETED.value
-            data["updated_at"] = datetime.now(timezone.utc).isoformat()
-            self.write_json(path, data)
+        for p in paths_to_delete:
+            # Mark as deleted rather than removing the file
+            data = self.read_json(p)
+            if data is not None:
+                interaction = Interaction.build(data)
+
+                # Remove from mention index before marking deleted
+                if interaction.mentioned_actors:
+                    self._update_mention_index(interaction, add=False)
+
+                # Note: We keep the object_id index for deleted interactions
+                # so they can still be looked up with status=DELETED
+
+                data["status"] = InteractionStatus.DELETED.value
+                data["updated_at"] = datetime.now(timezone.utc).isoformat()
+                self.write_json(p, data)
 
     def delete_interaction_by_object_id(
         self,
@@ -273,6 +360,7 @@ class FileActivityPubStorage(ActivityPubStorage):
             index_data["source_actor_id"],
             index_data["target_resource"],
             itype,
+            object_id=object_id,
         )
 
         data = self.read_json(interaction_path)
@@ -310,6 +398,7 @@ class FileActivityPubStorage(ActivityPubStorage):
             index_data["source_actor_id"],
             index_data["target_resource"],
             itype,
+            object_id=object_id,
         )
 
         data = self.read_json(interaction_path)
@@ -372,14 +461,34 @@ class FileActivityPubStorage(ActivityPubStorage):
                     "source_actor_id": interaction.source_actor_id,
                 }
 
+                if interaction.object_id:
+                    entry["object_id"] = interaction.object_id
+
                 if add:
-                    # Avoid duplicates
-                    if entry not in index:
+                    # Avoid duplicates — match on core fields
+                    match_keys = (
+                        "target_resource",
+                        "interaction_type",
+                        "source_actor_id",
+                        "object_id",
+                    )
+                    if not any(
+                        all(e.get(k) == entry.get(k) for k in match_keys) for e in index
+                    ):
                         index.append(entry)
                 else:
-                    # Remove if present
-                    if entry in index:
-                        index.remove(entry)
+                    # Remove matching entry
+                    index = [
+                        e
+                        for e in index
+                        if not (
+                            e.get("target_resource") == entry.get("target_resource")
+                            and e.get("interaction_type")
+                            == entry.get("interaction_type")
+                            and e.get("source_actor_id") == entry.get("source_actor_id")
+                            and e.get("object_id") == entry.get("object_id")
+                        )
+                    ]
 
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(json.dumps(index, indent=2), encoding="utf-8")
@@ -444,6 +553,7 @@ class FileActivityPubStorage(ActivityPubStorage):
                 entry["source_actor_id"],
                 entry["target_resource"],
                 itype,
+                object_id=entry.get("object_id"),
             )
             data = self.read_json(interaction_path)
             if data is None:
