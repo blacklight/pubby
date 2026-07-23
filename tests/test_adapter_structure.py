@@ -43,8 +43,18 @@ def test_fastapi_adapter_structure():
     app = FastAPI()
     bind_activitypub(app, handler)
 
-    # Check that routes were added
-    route_paths = [route.path for route in app.routes]
+    # Check that routes were added.
+    # In FastAPI >= 0.115, app.include_router() produces _IncludedRouter objects
+    # in app.routes (no .path attribute) instead of flattening the routes.
+    # We collect paths from direct routes and from any included routers.
+    route_paths = [route.path for route in app.routes if hasattr(route, "path")]
+    for route in app.routes:
+        if hasattr(route, "original_router"):
+            route_paths.extend(
+                r.path
+                for r in route.original_router.routes
+                if hasattr(r, "path")
+            )
 
     expected_paths = [
         "/.well-known/webfinger",
