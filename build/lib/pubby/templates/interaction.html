@@ -1,0 +1,72 @@
+<div class="ap-interaction ap-interaction-{{ interaction.interaction_type.value }}">
+  {% set safe_author_url = safe_url(interaction.author_url) %}
+  {% set safe_author_photo = safe_url(interaction.author_photo) %}
+  {% set fqn = actor_fqn(interaction.source_actor_id or interaction.author_url) %}
+  {% set safe_object_url = safe_url(interaction.object_id) %}
+
+  <div class="ap-interaction-author">
+    {% if safe_author_photo %}
+      <img class="ap-interaction-author-photo" src="{{ safe_author_photo }}" alt="" loading="lazy" />
+    {% endif %}
+
+    {% if interaction.author_name or interaction.author_url %}
+      {% if safe_author_url %}
+        <a class="ap-interaction-author-name" href="{{ safe_author_url }}">{{ interaction.author_name or hostname(safe_author_url) }}</a>
+      {% else %}
+        <span class="ap-interaction-author-name">{{ interaction.author_name }}</span>
+      {% endif %}
+      {% if fqn %}
+        <span class="ap-interaction-author-fqn">
+            <a href="{{ safe_author_url }}">{{ fqn }}</a>
+        </span>
+      {% endif %}
+    {% endif %}
+  </div>
+
+  <div class="ap-interaction-body">
+    {% if interaction.interaction_type.value == "reply" %}
+      {% if interaction.content %}
+        <div class="ap-interaction-content{{ ' ap-interaction-collapsible' if interaction.content|length > 1000 }}">{{ sanitize_html(interaction.content) }}</div>
+        {% if interaction.content|length > 1000 %}
+          <label class="ap-interaction-expand"><input type="checkbox" class="ap-interaction-toggle"></label>
+        {% endif %}
+      {% endif %}
+    {% elif interaction.interaction_type.value == "like" %}
+      <span class="ap-interaction-label">⭐ liked this</span>
+    {% elif interaction.interaction_type.value == "boost" %}
+      <span class="ap-interaction-label">🔁 boosted this</span>
+    {% elif interaction.interaction_type.value == "quote" %}
+      <span class="ap-interaction-label">🗣️ quoted this</span>
+      {% if interaction.content %}
+        <div class="ap-interaction-content{{ ' ap-interaction-collapsible' if interaction.content|length > 1000 }}">{{ sanitize_html(interaction.content) }}</div>
+        {% if interaction.content|length > 1000 %}
+          <label class="ap-interaction-expand"><input type="checkbox" class="ap-interaction-toggle"></label>
+        {% endif %}
+      {% endif %}
+    {% elif interaction.interaction_type.value == "mention" %}
+      {% if interaction.content %}
+        <div class="ap-interaction-content{{ ' ap-interaction-collapsible' if interaction.content|length > 1000 }}">{{ sanitize_html(interaction.content) }}</div>
+        {% if interaction.content|length > 1000 %}
+          <label class="ap-interaction-expand"><input type="checkbox" class="ap-interaction-toggle"></label>
+        {% endif %}
+      {% else %}
+        <span class="ap-interaction-label">mentioned this</span>
+      {% endif %}
+    {% else %}
+      <span class="ap-interaction-label">mentioned this</span>
+    {% endif %}
+  </div>
+
+  <div class="ap-interaction-footer">
+    {% if interaction.published %}
+      <span class="ap-interaction-date">
+        <time datetime="{{ interaction.published.isoformat() if interaction.published else '' }}">
+          {{ format_datetime(interaction.published) }}
+        </time>
+      </span>
+    {% endif %}
+    {% if safe_object_url and interaction.interaction_type.value in ("reply", "mention", "quote") %}
+      <a class="ap-interaction-source-link" href="{{ safe_object_url }}" target="_blank">original post ↗</a>
+    {% endif %}
+  </div>
+</div>
