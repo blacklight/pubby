@@ -82,6 +82,7 @@ class TestHandleFollow:
         assert follower.actor_id == actor_id
         assert follower.inbox == f"{actor_id}/inbox"
         assert follower.shared_inbox == "https://remote.example.com/inbox"
+        assert follower.target_actor_id == "https://blog.example.com/ap/actor"
 
         # Should send Accept
         assert result is not None
@@ -107,7 +108,10 @@ class TestHandleUndoFollow:
         }
 
         inbox_processor.process(activity, skip_verification=True)
-        mock_storage.remove_follower.assert_called_once_with(actor_id)
+        mock_storage.remove_follower.assert_called_once_with(
+            actor_id,
+            "https://blog.example.com/ap/actor",
+        )
 
 
 class TestHandleUndoLike:

@@ -302,7 +302,7 @@ class OutboxProcessor:
 
         # Collect follower inboxes only if addressed to followers
         if addressed_to_followers:
-            followers = self.storage.get_followers()
+            followers = self.storage.get_followers(actor_id=self.actor_id)
             follower_inboxes = self._collect_inboxes(followers)
             logger.debug(
                 "Collected %d follower inboxes for activity %s",

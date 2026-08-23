@@ -116,7 +116,7 @@ and `build()` (← JSON-LD) round-trip methods.
 | `Object` | ActivityPub Object (Note, Article, Image, …). Supports `mediaType`, `contentMap`, `quoteControl`, `interactionPolicy`. |
 | `Activity` | ActivityPub Activity wrapper (Create, Follow, Like, …). |
 | `Interaction` | Stored interaction from a remote actor — maps AP activities to a displayable format (analogous to a Webmention). |
-| `Follower` | Stored follower record (actor ID, inbox, shared inbox, cached actor data). |
+| `Follower` | Stored follower record (actor ID, inbox, shared inbox, cached actor data, plus `target_actor_id` identifying the local actor being followed). |
 
 **Enums:**
 
@@ -186,7 +186,7 @@ Public methods:
 | `publish_actor_update()` | Push the current actor profile to all followers. |
 | `get_actor_document()` | Build the actor's JSON-LD representation. |
 | `get_outbox()` | Return the outbox `OrderedCollection`. |
-| `get_followers_collection()` | Return the followers `OrderedCollection`. |
+| `get_followers_collection(actor_id=None)` | Return the followers `OrderedCollection`, optionally filtered by actor. |
 | `get_following_collection()` | Return the (empty) following `OrderedCollection`. |
 | `get_webfinger_response(resource)` | Build the WebFinger JRD response. |
 | `get_nodeinfo_discovery()` | Build the `.well-known/nodeinfo` document. |
@@ -264,7 +264,7 @@ Defines the contract every storage backend must fulfill:
 
 | Group | Methods |
 |-------|---------|
-| **Followers** | `store_follower()`, `remove_follower()`, `get_followers()` |
+| **Followers** | `store_follower()`, `remove_follower(actor_id, target_actor_id="")`, `get_followers(actor_id=None)` |
 | **Interactions** | `store_interaction()`, `delete_interaction()`, `delete_interaction_by_object_id()`, `get_interactions()`, `get_interaction_by_object_id()` |
 | **Activities** | `store_activity()`, `get_activities()` |
 | **Actor cache** | `cache_remote_actor()`, `get_cached_actor()` |
@@ -279,7 +279,9 @@ break when Pubby adds new features.
 - **Mixin models** (`_model.py`): `DbFollower`, `DbInteraction`,
   `DbActivity`, `DbActorCache` — framework-neutral SQLAlchemy column
   definitions.  Users inherit these into their own declarative Base to
-  choose table names.
+  choose table names.  `DbFollower` includes `target_actor_id` with a
+  unique constraint on `(actor_id, target_actor_id)` so the same remote
+  actor can follow multiple local actors.
 - **`DbActivityPubStorage`** (`_storage.py`): full `ActivityPubStorage`
   implementation using a `session_factory` callable.  Upsert logic uses
   insert-then-update-on-`IntegrityError`.
@@ -296,7 +298,8 @@ directory tree:
 
 ```
 data_dir/
-├── followers/{hash}.json
+├── followers/{hash}.json                     # unassigned/legacy followers
+├── followers/{target_hash}-{actor_hash}.json # per-actor followers (v4+)
 ├── interactions/
 │   ├── {target_hash}/{type}-{actor_hash}.json
 │   ├── _mentions/{actor_hash}.json      # mention index
@@ -320,7 +323,8 @@ setups that don't need a database.
 **Schema versioning**: A `.schema_version` file tracks the storage format.
 On initialization, `FileActivityPubStorage` checks this version and
 automatically runs any pending migrations (e.g., rebuilding indexes).
-Pass `auto_migrate=False` to disable.
+Pass `auto_migrate=False` to disable.  The current schema version is 4,
+which adds `target_actor_id` to follower records.
 
 ### 8. Render — `pubby.render`
 

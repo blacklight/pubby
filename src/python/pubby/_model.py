@@ -541,6 +541,10 @@ class Interaction:
 class Follower:
     """
     A stored follower record.
+
+    :param target_actor_id: The local actor URL being followed.
+        Empty string means the follower is not assigned to a specific actor
+        (legacy or unassigned).
     """
 
     actor_id: str
@@ -548,6 +552,7 @@ class Follower:
     shared_inbox: str = ""
     followed_at: datetime | None = None
     actor_data: dict = field(default_factory=dict)
+    target_actor_id: str = ""
 
     def to_dict(self) -> dict:
         """Return a JSON-serializable dictionary."""
@@ -562,4 +567,5 @@ class Follower:
             shared_inbox=data.get("shared_inbox", ""),
             followed_at=_parse_dt(data.get("followed_at")),
             actor_data=data.get("actor_data", {}),
+            target_actor_id=data.get("target_actor_id", ""),
         )

@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -19,6 +20,8 @@ from ._model import (
     DbInteraction,
     DbInteractionMention,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _upsert(
@@ -116,29 +119,59 @@ class DbActivityPubStorage(ActivityPubStorage):
                     "shared_inbox": follower.shared_inbox,
                     "followed_at": follower.followed_at or datetime.now(timezone.utc),
                     "actor_data": follower.actor_data or {},
+                    "target_actor_id": follower.target_actor_id or "",
                 },
-                index_elements=["actor_id"],
-                update_columns=["inbox", "shared_inbox", "actor_data"],
+                index_elements=["actor_id", "target_actor_id"],
+                update_columns=[
+                    "inbox",
+                    "shared_inbox",
+                    "actor_data",
+                ],
             )
         finally:
             session.close()
 
-    def remove_follower(self, actor_id: str):
+    def remove_follower(
+        self,
+        actor_id: str,
+        target_actor_id: str = "",
+    ):
+        if not target_actor_id:
+            logger.warning(
+                "remove_follower called without target_actor_id — "
+                "removing all follows from %s",
+                actor_id,
+            )
+
         session = self.session_factory()
         try:
-            session.query(self.follower_model).filter(
+            query = session.query(self.follower_model).filter(
                 self.follower_model.actor_id == actor_id
-            ).delete(synchronize_session=False)
+            )
+            if target_actor_id:
+                query = query.filter(
+                    self.follower_model.target_actor_id == target_actor_id
+                )
+            query.delete(synchronize_session=False)
             session.commit()
         finally:
             session.close()
 
-    def get_followers(self) -> list[Follower]:
+    def get_followers(
+        self,
+        actor_id: str | None = None,
+    ) -> list[Follower]:
         session = self.session_factory()
         try:
-            return [
-                row.to_follower() for row in session.query(self.follower_model).all()
-            ]
+            query = session.query(self.follower_model)
+            if actor_id is not None:
+                query = query.filter(
+                    sa.or_(
+                        self.follower_model.target_actor_id == actor_id,
+                        self.follower_model.target_actor_id == "",
+                    )
+                )
+            return [row.to_follower() for row in query.all()]
         finally:
             session.close()
 

@@ -340,7 +340,25 @@ class TestFollower:
         assert follower.actor_id == "https://mastodon.social/users/alice"
         assert follower.shared_inbox == "https://mastodon.social/inbox"
         assert follower.actor_data == {"name": "Alice"}
+        assert follower.target_actor_id == ""
 
         d = follower.to_dict()
         assert d["actor_id"] == "https://mastodon.social/users/alice"
         assert isinstance(d["followed_at"], str)
+
+    def test_build_and_to_dict_with_target_actor_id(self):
+        now = datetime.now(timezone.utc)
+        data = {
+            "actor_id": "https://mastodon.social/users/alice",
+            "inbox": "https://mastodon.social/users/alice/inbox",
+            "target_actor_id": "https://blog.example.com/ap/actor",
+            "followed_at": now.isoformat(),
+            "actor_data": {"name": "Alice"},
+        }
+
+        follower = Follower.build(data)
+        assert follower.target_actor_id == "https://blog.example.com/ap/actor"
+
+        d = follower.to_dict()
+        rebuilt = Follower.build(d)
+        assert rebuilt.target_actor_id == "https://blog.example.com/ap/actor"

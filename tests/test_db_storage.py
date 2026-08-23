@@ -85,6 +85,126 @@ class TestFollowers:
             )
         assert len(storage.get_followers()) == 5
 
+    def test_filter_followers_by_target_actor(self, storage):
+        actor_a = "https://blog.example.com/ap/actor"
+        actor_b = "https://blog.example.com/ap/other"
+
+        storage.store_follower(
+            Follower(
+                actor_id="https://remote.example.com/users/alice",
+                inbox="https://remote.example.com/users/alice/inbox",
+                target_actor_id=actor_a,
+            )
+        )
+        storage.store_follower(
+            Follower(
+                actor_id="https://remote.example.com/users/bob",
+                inbox="https://remote.example.com/users/bob/inbox",
+                target_actor_id=actor_b,
+            )
+        )
+
+        a_followers = storage.get_followers(actor_id=actor_a)
+        assert len(a_followers) == 1
+        assert a_followers[0].actor_id == "https://remote.example.com/users/alice"
+
+        all_followers = storage.get_followers()
+        assert len(all_followers) == 2
+
+    def test_same_remote_actor_can_follow_multiple_local_actors(self, storage):
+        actor_a = "https://blog.example.com/ap/actor"
+        actor_b = "https://blog.example.com/ap/other"
+        remote = "https://remote.example.com/users/alice"
+
+        storage.store_follower(
+            Follower(
+                actor_id=remote,
+                inbox="https://remote.example.com/users/alice/inbox",
+                target_actor_id=actor_a,
+            )
+        )
+        storage.store_follower(
+            Follower(
+                actor_id=remote,
+                inbox="https://remote.example.com/users/alice/inbox",
+                target_actor_id=actor_b,
+            )
+        )
+
+        assert len(storage.get_followers()) == 2
+        assert len(storage.get_followers(actor_id=actor_a)) == 1
+        assert len(storage.get_followers(actor_id=actor_b)) == 1
+
+    def test_remove_follower_by_target_actor(self, storage):
+        actor_a = "https://blog.example.com/ap/actor"
+        actor_b = "https://blog.example.com/ap/other"
+        remote = "https://remote.example.com/users/alice"
+
+        storage.store_follower(
+            Follower(
+                actor_id=remote,
+                inbox="https://remote.example.com/users/alice/inbox",
+                target_actor_id=actor_a,
+            )
+        )
+        storage.store_follower(
+            Follower(
+                actor_id=remote,
+                inbox="https://remote.example.com/users/alice/inbox",
+                target_actor_id=actor_b,
+            )
+        )
+
+        storage.remove_follower(remote, target_actor_id=actor_a)
+
+        assert len(storage.get_followers(actor_id=actor_a)) == 0
+        assert len(storage.get_followers(actor_id=actor_b)) == 1
+
+    def test_remove_follower_without_target_removes_all(self, storage, caplog):
+        actor_a = "https://blog.example.com/ap/actor"
+        actor_b = "https://blog.example.com/ap/other"
+        remote = "https://remote.example.com/users/alice"
+
+        storage.store_follower(
+            Follower(
+                actor_id=remote,
+                inbox="https://remote.example.com/users/alice/inbox",
+                target_actor_id=actor_a,
+            )
+        )
+        storage.store_follower(
+            Follower(
+                actor_id=remote,
+                inbox="https://remote.example.com/users/alice/inbox",
+                target_actor_id=actor_b,
+            )
+        )
+
+        with caplog.at_level("WARNING", logger="pubby.storage.adapters.db._storage"):
+            storage.remove_follower(remote)
+
+        assert len(storage.get_followers()) == 0
+        assert "without target_actor_id" in caplog.text
+
+    def test_unassigned_legacy_follower_visible_to_all_actors(self, storage):
+        actor_a = "https://blog.example.com/ap/actor"
+        actor_b = "https://blog.example.com/ap/other"
+
+        storage.store_follower(
+            Follower(
+                actor_id="https://remote.example.com/users/alice",
+                inbox="https://remote.example.com/users/alice/inbox",
+                # no target_actor_id - legacy/unassigned
+            )
+        )
+
+        a_followers = storage.get_followers(actor_id=actor_a)
+        b_followers = storage.get_followers(actor_id=actor_b)
+
+        assert len(a_followers) == 1
+        assert len(b_followers) == 1
+        assert a_followers[0].target_actor_id == ""
+
 
 class TestInteractions:
     def test_store_and_get_interaction(self, storage):

@@ -304,13 +304,25 @@ class ActivityPubHandler:
 
     # ---------- Collections ----------
 
-    def get_followers_collection(self) -> dict:
+    def get_followers_collection(
+        self,
+        actor_id: str | None = None,
+    ) -> dict:
         """
         Build the followers OrderedCollection.
 
+        :param actor_id: If provided, return followers of this actor.
+            If None, return followers of the handler's configured actor.
         :return: The followers collection dictionary.
+
+        Unassigned/legacy followers with an empty ``target_actor_id`` are
+        included through ``get_followers(actor_id=...)`` for backward
+        compatibility. Applications upgrading a single-actor deployment to
+        multi-actor should backfill ``target_actor_id`` on existing followers
+        to avoid them appearing in every actor's collection.
         """
-        followers = self.storage.get_followers()
+        target = actor_id or self.actor_id
+        followers = self.storage.get_followers(actor_id=target)
         return {
             "@context": AP_CONTEXT,
             "id": self.followers_url,

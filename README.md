@@ -30,6 +30,8 @@
 - [Key Management](#key-management)
 - [Custom Storage](#custom-storage)
   - [File-based Storage](#file-based-storage)
+  - [Multi-actor Support](#multi-actor-support)
+    - [Upgrading from single-actor deployments](#upgrading-from-single-actor-deployments)
 - [Configuration Reference](#configuration-reference)
   - [`ActivityPubHandler` Parameters](#activitypubhandler-parameters)
   - [`actor_config`](#actor_config)
@@ -43,6 +45,7 @@
     - [`ActorConfig`](#actorconfig)
     - [`Object`](#object)
     - [`Interaction`](#interaction)
+    - [`Follower`](#follower)
     - [Quote policies (Mastodon)](#quote-policies-mastodon)
     - [QuoteAuthorization (FEP-044f)](#quoteauthorization-fep-044f)
     - [`Mention`](#mention)
@@ -366,10 +369,10 @@ class MyStorage(ActivityPubStorage):
     def store_follower(self, follower: Follower):
         ...
 
-    def remove_follower(self, actor_id: str):
+    def remove_follower(self, actor_id: str, target_actor_id: str = ""):
         ...
 
-    def get_followers(self) -> list[Follower]:
+    def get_followers(self, actor_id: str | None = None) -> list[Follower]:
         ...
 
     def store_interaction(self, interaction: Interaction):
@@ -426,6 +429,68 @@ thread-safe access via `RLock` per resource.
 ```python
 storage = FileActivityPubStorage(data_dir="...", auto_migrate=False)
 ```
+
+### Multi-actor Support
+
+Pubby now supports multiple local actors sharing the same storage backend.
+A `Follower` record has a `target_actor_id` field that identifies which local
+actor is being followed. The `InboxProcessor` extracts this from the
+`Follow.object` field and `OutboxProcessor.publish()` fans out only to the
+publishing actor's followers.
+
+```python
+from pubby import ActivityPubHandler
+from pubby.storage.adapters.db import init_db_storage
+
+storage = init_db_storage("sqlite:////tmp/pubby.db")
+
+alice = ActivityPubHandler(
+    storage=storage,
+    actor_config={
+        "base_url": "https://alice.example.com",
+        "username": "alice",
+    },
+    private_key=alice_key,
+)
+
+bob = ActivityPubHandler(
+    storage=storage,
+    actor_config={
+        "base_url": "https://bob.example.com",
+        "username": "bob",
+    },
+    private_key=bob_key,
+)
+```
+
+When implementing a custom storage backend, honour the `actor_id` parameter
+in `get_followers()` and the `target_actor_id` parameter in `remove_follower()`.
+Legacy followers with an empty `target_actor_id` are treated as unassigned and
+returned for any actor until they are backfilled.
+
+#### Upgrading from single-actor deployments
+
+When upgrading an existing single-actor instance, existing followers have an
+empty `target_actor_id`. They remain visible to all local actors (via
+`get_followers(actor_id=...)` and `get_followers_collection()`) until the
+application backfills them with the correct actor URL.
+
+Backfill existing followers by removing the unassigned record and re-storing
+it with the correct `target_actor_id`:
+
+```python
+local_actor = "https://example.com/ap/actor"
+for follower in storage.get_followers():
+    if not follower.target_actor_id:
+        storage.remove_follower(follower.actor_id)
+        follower.target_actor_id = local_actor
+        storage.store_follower(follower)
+```
+
+After backfilling, each follower appears only in the collection of the actor
+they follow. `remove_follower(actor_id)` without a `target_actor_id` removes
+all follow records from the given remote actor, so multi-actor code should
+always pass `target_actor_id` for precise removal.
 
 ## Configuration Reference
 
@@ -667,6 +732,30 @@ interaction = Interaction(
 | `status` | `InteractionStatus` | `PENDING`, `CONFIRMED`, or `DELETED` |
 | `metadata` | `dict` | Additional data (e.g. `raw_object`) |
 | `mentioned_actors` | `list[str]` | Actor URLs mentioned in this interaction |
+
+#### `Follower`
+
+Represents a stored follower (a remote actor that follows a local actor):
+
+```python
+from pubby import Follower
+
+follower = Follower(
+    actor_id="https://mastodon.social/users/alice",
+    inbox="https://mastodon.social/users/alice/inbox",
+    shared_inbox="https://mastodon.social/inbox",
+    target_actor_id="https://example.com/ap/actor",
+)
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `actor_id` | `str` | Remote actor URL |
+| `inbox` | `str` | Inbox URL of the remote actor |
+| `shared_inbox` | `str` | Shared inbox URL (optional) |
+| `followed_at` | `datetime` | When the follow was received |
+| `actor_data` | `dict` | Cached actor document |
+| `target_actor_id` | `str` | Local actor URL being followed (empty for unassigned/legacy) |
 
 #### Quote policies (Mastodon)
 

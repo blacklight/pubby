@@ -2,6 +2,45 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- **Multi-actor / per-actor follower isolation**: `Follower` and `DbFollower`
+  now include a `target_actor_id` field that records which local actor is being
+  followed. `InboxProcessor._handle_follow()` extracts the target from
+  `Follow.object` and `OutboxProcessor.publish()` fans out only to the
+  publishing actor's followers. `ActivityPubHandler.get_followers_collection()`
+  accepts an optional `actor_id` parameter.
+- `ActivityPubStorage.get_followers()` accepts an optional `actor_id` filter.
+- `ActivityPubStorage.remove_follower()` accepts an optional `target_actor_id`
+  parameter for per-actor unfollows.
+
+### Changed
+
+- **File storage schema bumped to v4**: follower files may now be keyed by
+  `target_actor_id` so the same remote actor can follow multiple local actors.
+  Existing unassigned followers are treated as visible to all actors until
+  backfilled.
+- **DB storage**: `DbFollower` replaces the unique constraint on `actor_id`
+  with a unique constraint on `(actor_id, target_actor_id)`.
+
+### Fixed
+
+- `Undo/Follow` now removes only the follow record for the correct target actor
+  instead of all follows from the same remote actor.
+- `FileActivityPubStorage.remove_follower()` without `target_actor_id` now
+  removes all matching follower files (matching DB behavior) instead of only the
+  legacy unassigned file, and warns when this happens.
+- `DbActivityPubStorage.store_follower()` no longer redundantly updates
+  `target_actor_id` during conflict resolution; the unique key already includes it.
+
+### Docs
+
+- Documented the legacy-follower backfill process in `README.md` and updated
+  storage/docstring warnings that `remove_follower()` without `target_actor_id`
+  removes all follow records from a remote actor.
+
 ## 0.2.21
 
 ### Fixed

@@ -45,7 +45,7 @@ def actor_to_account(handler: ActivityPubHandler) -> dict[str, Any]:
     :param handler: The ActivityPubHandler instance.
     :return: A Mastodon-compatible Account dictionary.
     """
-    followers = handler.storage.get_followers()
+    followers = handler.storage.get_followers(actor_id=handler.actor_id)
     activities = handler.storage.get_activities(limit=10000, offset=0)
 
     fields: list[dict[str, Any]] = []

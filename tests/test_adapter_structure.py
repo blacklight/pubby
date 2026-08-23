@@ -51,9 +51,7 @@ def test_fastapi_adapter_structure():
     for route in app.routes:
         if hasattr(route, "original_router"):
             route_paths.extend(
-                r.path
-                for r in route.original_router.routes
-                if hasattr(r, "path")
+                r.path for r in route.original_router.routes if hasattr(r, "path")
             )
 
     expected_paths = [

@@ -260,12 +260,23 @@ class InboxProcessor:
         inbox = actor.inbox
         shared_inbox = actor.endpoints.get("sharedInbox", "")
 
+        # The Follow object identifies the local actor being followed.
+        target = activity.object
+        if isinstance(target, dict):
+            target_actor_id = target.get("id", "")
+        elif isinstance(target, str):
+            target_actor_id = target
+        else:
+            target_actor_id = ""
+        target_actor_id = target_actor_id or self.actor_id
+
         follower = Follower(
             actor_id=actor_id,
             inbox=inbox,
             shared_inbox=shared_inbox,
             followed_at=datetime.now(timezone.utc),
             actor_data=actor_data,
+            target_actor_id=target_actor_id,
         )
         self.storage.store_follower(follower)
 
@@ -294,7 +305,18 @@ class InboxProcessor:
         if inner_type == "Follow":
             actor_id = activity.actor
             logger.info("Processing Undo Follow from %s", actor_id)
-            self.storage.remove_follower(actor_id)
+
+            # Identify the target actor from the inner Follow activity.
+            target_actor_id = ""
+            if isinstance(inner, dict):
+                target = inner.get("object", "")
+                if isinstance(target, dict):
+                    target_actor_id = target.get("id", "")
+                elif isinstance(target, str):
+                    target_actor_id = target
+            target_actor_id = target_actor_id or self.actor_id
+
+            self.storage.remove_follower(actor_id, target_actor_id)
         elif inner_type in ("Like", "Announce") and isinstance(inner, dict):
             self._handle_undo_interaction(activity, inner)
         else:

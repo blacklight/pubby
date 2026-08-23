@@ -2,12 +2,13 @@
 Tests for storage migration utilities.
 """
 
+import json
 import tempfile
 from datetime import datetime, timezone
 
 import pytest
 
-from pubby._model import Interaction, InteractionType
+from pubby._model import Follower, Interaction, InteractionType
 from pubby.storage import backfill_mentions
 from pubby.storage._migrations import extract_mentions_from_tags
 from pubby.storage.adapters.file import FileActivityPubStorage
@@ -220,3 +221,48 @@ class TestBackfillMentions:
         assert stats["updated"] == 1
         assert stats["skipped_no_metadata"] == 1
         assert stats["skipped_already_has_mentions"] == 1
+
+
+class TestFileSchemaV4Migration:
+    """Tests for the v3 to v4 file storage follower migration."""
+
+    def test_v3_to_v4_migrates_legacy_followers(self, tmp_path):
+        from pubby.storage.adapters.file._storage import (
+            SCHEMA_VERSION,
+            _sanitize,
+        )
+
+        remote = "https://remote.example.com/users/alice"
+        local_actor = "https://blog.example.com/ap/actor"
+
+        # Simulate a v3 store: a legacy follower file without target_actor_id
+        followers_dir = tmp_path / "followers"
+        followers_dir.mkdir(parents=True)
+        legacy_path = followers_dir / f"{_sanitize(remote)}.json"
+        legacy_path.write_text(
+            json.dumps(
+                Follower(
+                    actor_id=remote,
+                    inbox="https://remote.example.com/users/alice/inbox",
+                ).to_dict()
+            ),
+            encoding="utf-8",
+        )
+
+        # Mark the store as schema version 3
+        version_path = tmp_path / ".schema_version"
+        version_path.write_text("3", encoding="utf-8")
+
+        # Open the storage: this should run the v4 migration
+        storage = FileActivityPubStorage(data_dir=tmp_path)
+
+        assert storage._get_schema_version() == SCHEMA_VERSION
+
+        # Legacy/unassigned followers are still returned for any actor
+        actor_followers = storage.get_followers(actor_id=local_actor)
+        all_followers = storage.get_followers()
+
+        assert len(actor_followers) == 1
+        assert actor_followers[0].actor_id == remote
+        assert actor_followers[0].target_actor_id == ""
+        assert len(all_followers) == 1

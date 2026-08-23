@@ -53,7 +53,7 @@ class MastodonAPI:
         return actor_to_account(self.handler)
 
     def _peer_domains(self) -> list[str]:
-        followers = self.handler.storage.get_followers()
+        followers = self.handler.storage.get_followers(actor_id=self.handler.actor_id)
         domains: set[str] = set()
         for f in followers:
             parsed = urlparse(f.actor_id)
@@ -301,7 +301,7 @@ class MastodonAPI:
             return {"error": "Record not found"}, 404
 
         limit = min(max(limit, 1), 80)
-        followers = self.handler.storage.get_followers()
+        followers = self.handler.storage.get_followers(actor_id=self.handler.actor_id)
         accounts = [follower_to_account(f) for f in followers]
 
         # Cursor-based pagination

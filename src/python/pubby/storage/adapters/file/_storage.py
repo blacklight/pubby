@@ -43,7 +43,8 @@ logger = logging.getLogger(__name__)
 # 1: Initial version (no version file = version 0)
 # 2: Added _object_ids/ index for get_interaction_by_object_id()
 # 3: Reply/quote files keyed by object_id to allow multiple per actor
-SCHEMA_VERSION = 3
+# 4: Added target_actor_id to followers for per-actor isolation
+SCHEMA_VERSION = 4
 
 # Interaction types that allow multiple interactions from the same actor
 # to the same target resource (e.g. multiple replies to the same post).
@@ -51,7 +52,13 @@ _MULTI_INTERACTION_TYPES = frozenset({InteractionType.REPLY, InteractionType.QUO
 
 
 def _sanitize(value: str) -> str:
-    """Create a filesystem-safe name from a URL or ID."""
+    """Create a filesystem-safe name from a URL or ID.
+
+    Uses the first 16 hex characters of a SHA-256 hash together with a
+    readable prefix from the original value. The combination makes
+    accidental collisions between distinct real-world URLs
+    computationally infeasible, while keeping filenames reasonably short.
+    """
     h = hashlib.sha256(value.encode("utf-8")).hexdigest()[:16]
     # Keep a readable prefix from the value
     safe = "".join(c if c.isalnum() or c in "-_." else "-" for c in value)
@@ -113,6 +120,7 @@ class FileActivityPubStorage(ActivityPubStorage):
         migrations = {
             2: self._migrate_to_v2_object_id_index,
             3: self._migrate_to_v3_multi_reply_files,
+            4: self._migrate_to_v4_target_actor_id,
         }
 
         for version in range(current + 1, SCHEMA_VERSION + 1):
@@ -188,6 +196,16 @@ class FileActivityPubStorage(ActivityPubStorage):
 
         logger.info("Renamed/created %d reply/quote files with object_id key", renamed)
 
+    def _migrate_to_v4_target_actor_id(self) -> None:
+        """Migrate to v4: add target_actor_id support to followers.
+
+        Existing follower files do not contain ``target_actor_id`` and
+        default to an empty string (unassigned). They remain visible to
+        all actors until the application backfills the field. No file
+        movement is required.
+        """
+        logger.info("No-op migration to v4: target_actor_id field added to followers")
+
     def _get_lock(self, path: str) -> threading.RLock:
         """Get or create an RLock for a given path."""
         with self._global_lock:
@@ -236,24 +254,89 @@ class FileActivityPubStorage(ActivityPubStorage):
 
     # ---------- Followers ----------
 
-    def _follower_path(self, actor_id: str) -> Path:
-        return self.data_dir / "followers" / f"{_sanitize(actor_id)}.json"
+    def _follower_path(
+        self,
+        actor_id: str,
+        target_actor_id: str = "",
+    ) -> Path:
+        """Path to a follower file.
+
+        When ``target_actor_id`` is set, the path includes it so the same
+        remote actor can follow multiple local actors. Legacy files without
+        a target use the original single-actor layout.
+        """
+        if target_actor_id:
+            filename = f"{_sanitize(target_actor_id)}-{_sanitize(actor_id)}.json"
+        else:
+            filename = f"{_sanitize(actor_id)}.json"
+        return self.data_dir / "followers" / filename
 
     def store_follower(self, follower: Follower):
-        path = self._follower_path(follower.actor_id)
+        path = self._follower_path(
+            follower.actor_id,
+            follower.target_actor_id or "",
+        )
         self.write_json(path, follower.to_dict())
 
-    def remove_follower(self, actor_id: str):
-        path = self._follower_path(actor_id)
+    def remove_follower(
+        self,
+        actor_id: str,
+        target_actor_id: str = "",
+    ):
+        """Remove a follower file.
+
+        When ``target_actor_id`` is omitted, all follow records from this
+        remote actor are removed (both per-actor and legacy files). In
+        multi-actor setups this can be unintentionally destructive; callers
+        should pass ``target_actor_id`` for precise removal.
+        """
+        if not target_actor_id:
+            logger.warning(
+                "remove_follower called without target_actor_id — "
+                "removing all follows from %s",
+                actor_id,
+            )
+            removed = 0
+            followers_dir = self.data_dir / "followers"
+            for fpath in self.list_json_files(followers_dir):
+                data = self.read_json(fpath)
+                if data is not None:
+                    try:
+                        if data.get("actor_id") == actor_id:
+                            self._delete_file(fpath)
+                            removed += 1
+                    except Exception:
+                        logger.warning(
+                            "Failed to inspect follower file %s", fpath, exc_info=True
+                        )
+            if removed:
+                return
+            # Fall back to the legacy path in case it uses a different layout
+        else:
+            # Try the target-specific path first
+            path = self._follower_path(actor_id, target_actor_id)
+            if self._delete_file(path):
+                return
+        path = self._follower_path(actor_id, "")
         self._delete_file(path)
 
-    def get_followers(self) -> list[Follower]:
+    def get_followers(
+        self,
+        actor_id: str | None = None,
+    ) -> list[Follower]:
         followers_dir = self.data_dir / "followers"
         result = []
         for fpath in self.list_json_files(followers_dir):
             data = self.read_json(fpath)
             if data is not None:
-                result.append(Follower.build(data))
+                follower = Follower.build(data)
+                if actor_id is None:
+                    result.append(follower)
+                elif follower.target_actor_id == actor_id:
+                    result.append(follower)
+                elif not follower.target_actor_id:
+                    # Unassigned/legacy followers are visible to all actors
+                    result.append(follower)
         return result
 
     # ---------- Interactions ----------

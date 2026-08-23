@@ -18,11 +18,20 @@ class DbFollower:
     """
 
     id = sa.Column(sa.Integer, primary_key=True, autoincrement=True)
-    actor_id = sa.Column(sa.String, nullable=False, unique=True)
+    actor_id = sa.Column(sa.String, nullable=False)
     inbox = sa.Column(sa.String, nullable=False)
     shared_inbox = sa.Column(sa.String, nullable=False, default="")
     followed_at = sa.Column(sa.DateTime, nullable=False)
     actor_data = sa.Column(sa.JSON, nullable=False, default=dict)
+    target_actor_id = sa.Column(sa.String, nullable=False, default="", index=True)
+
+    __table_args__ = (
+        sa.UniqueConstraint(
+            "actor_id",
+            "target_actor_id",
+            name="uix_follower_actor_target",
+        ),
+    )
 
     def __init__(self, *_, **kwargs):
         for key, value in kwargs.items():
@@ -40,6 +49,7 @@ class DbFollower:
             shared_inbox=follower.shared_inbox,
             followed_at=follower.followed_at or datetime.now(timezone.utc),
             actor_data=follower.actor_data or {},
+            target_actor_id=follower.target_actor_id or "",
         )
 
     def to_follower(self) -> Follower:
@@ -49,6 +59,7 @@ class DbFollower:
             shared_inbox=self.shared_inbox or "",  # type: ignore
             followed_at=self.followed_at,  # type: ignore
             actor_data=dict(self.actor_data) if self.actor_data else {},  # type: ignore
+            target_actor_id=self.target_actor_id or "",  # type: ignore
         )
 
 

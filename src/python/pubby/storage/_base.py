@@ -22,22 +22,45 @@ class ActivityPubStorage(ABC):
         """
         Store or update a follower record.
 
+        The caller should set ``Follower.target_actor_id`` to the local
+        actor URL being followed. If left empty, the follower is treated
+        as unassigned and may be returned for any actor.
+
         :param follower: The Follower to store.
         """
 
     @abstractmethod
-    def remove_follower(self, actor_id: str) -> Any:
+    def remove_follower(
+        self,
+        actor_id: str,
+        target_actor_id: str = "",
+    ) -> Any:
         """
         Remove a follower by their actor ID.
 
         :param actor_id: The actor ID of the follower to remove.
+        :param target_actor_id: Optional local actor URL to scope the
+            removal. If provided, only the follower of that actor is removed.
+            When omitted, all follow records from this remote actor are
+            removed. In multi-actor setups this can be unintentionally
+            destructive; callers should always pass ``target_actor_id``
+            unless they intend to remove every follow from this actor.
         """
 
     @abstractmethod
-    def get_followers(self) -> list[Follower]:
+    def get_followers(
+        self,
+        actor_id: str | None = None,
+    ) -> list[Follower]:
         """
-        Retrieve all stored followers.
+        Retrieve stored followers.
 
+        :param actor_id: If provided, only return followers of this actor
+            (plus any unassigned followers with an empty ``target_actor_id``).
+            Implementations should include unassigned followers for backward
+            compatibility until the application backfills their
+            ``target_actor_id``.
+            If None, return all followers.
         :return: A list of Follower records.
         """
 
