@@ -33,7 +33,7 @@ from .handlers import ActivityPubHandler
 from .storage import ActivityPubStorage
 from .webfinger import Mention, extract_mentions, resolve_actor_url
 
-__version__ = "0.2.22"
+__version__ = "0.2.23"
 
 __all__ = [
     "Activity",
