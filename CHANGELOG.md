@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- New `pubby.content` module for rendering plain text into safe ActivityPub
+  HTML and `Hashtag` tag dicts. Includes `RenderedContent`,
+  `render_post_html`, `render_bio_html`, `build_hashtag_tags`,
+  `render_verified_link`, `property_value_attachment`, `is_linkable_url`,
+  `display_url`, and `render_link_anchor`.
+
 ## 0.2.22
 
 ### Added

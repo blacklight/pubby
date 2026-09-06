@@ -27,6 +27,7 @@
     - [`bind_mastodon_api` Parameters](#bind_mastodon_api-parameters)
     - [Status & Account IDs](#status--account-ids)
 - [Publishing Content](#publishing-content)
+- [Rendering Plain-Text Content](#rendering-plain-text-content)
 - [Key Management](#key-management)
 - [Custom Storage](#custom-storage)
   - [File-based Storage](#file-based-storage)
@@ -56,6 +57,7 @@
     - [`handler.publish_object(obj, activity_type="Create")`](#handlerpublish_objectobj-activity_typecreate)
     - [`handler.publish_activity(activity)`](#handlerpublish_activityactivity)
     - [`handler.publish_actor_update()`](#handlerpublish_actor_update)
+  - [Content Rendering](#content-rendering)
   - [Storage](#storage)
     - [`ActivityPubStorage`](#activitypubstorage)
     - [`get_interaction_by_object_id(object_id, status=CONFIRMED)`](#get_interaction_by_object_idobject_id-statusconfirmed)
@@ -330,6 +332,56 @@ handler.publish_object(deleted_article, activity_type="Delete")
 Delivery is concurrent (configurable via `max_delivery_workers`, default 10)
 with automatic retry and exponential backoff on failure.
 
+## Rendering Plain-Text Content
+
+`pubby.content` turns plain user text into safe ActivityPub HTML and `Hashtag`
+tags. It is stdlib-only and independent of the inbound HTML sanitiser in
+`pubby.render`.
+
+Render a post and publish it:
+
+```python
+from pubby import Object, build_hashtag_tags, render_post_html
+
+hashtag_url = lambda name: f"https://example.com/tags/{name}"
+
+rc = render_post_html(
+    "Hello fediverse! #intro https://example.com/about",
+    hashtag_url,
+)
+
+post = Object(
+    id="https://example.com/posts/1",
+    type="Note",
+    content=rc.html,
+    url="https://example.com/posts/1",
+    attributed_to="https://example.com/ap/actor",
+    tag=build_hashtag_tags(rc.hashtags, hashtag_url),
+)
+
+handler.publish_object(post)
+```
+
+For bios that should only linkify URLs, use `render_bio_html` on the `summary`
+field:
+
+```python
+from pubby import ActivityPubHandler, render_bio_html
+
+handler = ActivityPubHandler(
+    storage=storage,
+    actor_config={
+        "base_url": "https://example.com",
+        "username": "blog",
+        "summary": render_bio_html("Find me at https://example.com/links."),
+    },
+    private_key=private_key,
+)
+```
+
+See the [Content Rendering](#content-rendering) API reference for the full
+list of helpers.
+
 ## Key Management
 
 **Important:** your RSA keypair is your server's identity. Persist it — if you
@@ -573,6 +625,28 @@ handler = ActivityPubHandler(
 For Mastodon's green verified-link checkmark to appear, the linked page must
 contain a `<link rel="me" href="https://example.com/ap/actor">` tag pointing
 back to the actor URL.
+
+You can also build attachments safely with `property_value_attachment`, which
+renders the URL as a `rel="me"` link when valid and escaped text otherwise:
+
+```python
+from pubby import ActivityPubHandler, property_value_attachment
+
+handler = ActivityPubHandler(
+    storage=storage,
+    actor_config={
+        "base_url": "https://example.com",
+        "username": "blog",
+        "name": "My Blog",
+        "summary": "A blog with ActivityPub support",
+        "attachment": [
+            property_value_attachment("Website", "https://example.com"),
+            property_value_attachment("GitHub", "https://github.com/me", label="@me"),
+        ],
+    },
+    private_key=private_key,
+)
+```
 
 ## Rendering Interactions
 
@@ -921,6 +995,40 @@ handler.publish_actor_update()
 
 The method builds an `Update` activity whose `object` is the full actor
 document, and fans it out to every follower inbox.
+
+### Content Rendering
+
+`pubby.content` produces outbound ActivityPub HTML from plain text. These
+helpers escape all input and only turn validated `http`/`https` URLs into
+anchors, so the output is safe to federate.
+
+```python
+from pubby import (
+    RenderedContent,
+    build_hashtag_tags,
+    render_bio_html,
+    render_post_html,
+)
+
+rc = render_post_html("New post #fediverse", lambda name: f"https://example.com/tags/{name}")
+assert isinstance(rc, RenderedContent)
+assert rc.html == 'New post <a href="https://example.com/tags/fediverse" rel="tag">#fediverse</a>'
+assert rc.hashtags == ["fediverse"]
+
+tags = build_hashtag_tags(rc.hashtags, lambda name: f"https://example.com/tags/{name}")
+# tags == [{"type": "Hashtag", "name": "#fediverse", "href": "..."}]
+```
+
+| Function | Description |
+|---|---|
+| `render_post_html(text, hashtag_url)` | Render a post with URL + hashtag linkification. |
+| `render_bio_html(bio)` | Render a bio with URL linkification only. |
+| `build_hashtag_tags(names, hashtag_url)` | Build `Hashtag` tag dicts from normalized names. |
+| `render_verified_link(url, label=None)` | Render a `rel="me"` link or escaped text. |
+| `property_value_attachment(name, url, label=None)` | Build a `PropertyValue` dict for `ActorConfig.attachment`. |
+| `is_linkable_url(url)` | `True` for safe `http`/`https` URLs with a hostname. |
+| `display_url(url)` | Scheme-less URL for use as link text. |
+| `render_link_anchor(url, rel=None, label=None)` | Render an HTML `<a>` element. |
 
 ### Storage
 

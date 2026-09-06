@@ -70,6 +70,9 @@ src/python/pubby/
 │   ├── _discovery.py        # WebFinger & NodeInfo response builders
 │   └── _client.py           # Default User-Agent helper
 │
+├── content/
+│   └── __init__.py          # Plain-text → ActivityPub HTML / Hashtag tags
+│
 ├── render/
 │   └── _renderer.py         # Jinja2-based HTML renderer for interactions
 │
@@ -344,7 +347,26 @@ HTML sanitization (`_sanitize_html`) strips disallowed tags and attributes
 via regex, permitting a safe subset (links, basic formatting,
 blockquotes, lists) and only `http`/`https` href schemes.
 
-### 9. Server Adapters — `pubby.server.adapters`
+### 9. Content Rendering — `pubby.content`
+
+A stdlib-only module that produces outbound ActivityPub HTML from local plain
+text.  It is intentionally independent of `pubby.render` (which sanitises
+inbound HTML): `pubby.content` escapes all input and only emits anchors for
+validated `http`/`https` URLs.
+
+- **`render_post_html(text, hashtag_url)`** — escapes text, linkifies URLs,
+  turns `#hashtags` into `rel="tag"` links, and returns a `RenderedContent`
+  dataclass with the HTML and a deduplicated list of normalized tag names.
+- **`render_bio_html(bio)`** — escapes bio text and linkifies URLs without
+  hashtag processing.
+- **`build_hashtag_tags(names, hashtag_url)`** — maps normalized tag names to
+  ActivityPub `Hashtag` tag dicts, preserving order and without deduplication.
+- **`render_verified_link(url, label=None)`** — renders a `rel="me"` anchor for
+  valid URLs or escaped text for invalid ones.
+- **`property_value_attachment(name, url, label=None)`** — builds a
+  `PropertyValue` dict suitable for `ActorConfig.attachment`.
+
+### 10. Server Adapters — `pubby.server.adapters`
 
 Each framework gets two modules:
 
@@ -374,7 +396,7 @@ All `bind_activitypub()` functions register the same set of routes:
 The `prefix` (default `/ap`) is configurable.  The inbox route
 optionally applies the `RateLimiter`.
 
-### 10. Mastodon-Compatible API — `pubby.server.mastodon`
+### 11. Mastodon-Compatible API — `pubby.server.mastodon`
 
 A read-only subset of the
 [Mastodon REST API](https://docs.joinmastodon.org/methods/) so that
@@ -422,6 +444,7 @@ pubby.__init__
   ├── pubby._model            (dataclasses, enums, AP_CONTEXT)
   ├── pubby._exceptions       (exception hierarchy)
   ├── pubby._rate_limit       (RateLimiter)
+  ├── pubby.content            (plain-text HTML renderers, Hashtag tag builder)
   ├── pubby.webfinger          (Mention, resolve_actor_url, extract_mentions)
   ├── pubby.crypto             (_keys, _signatures)
   ├── pubby.handlers           (ActivityPubHandler)
