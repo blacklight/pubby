@@ -9,6 +9,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
+from typing import Collection
 
 import requests
 
@@ -19,6 +20,7 @@ from .._model import (
     Object,
 )
 from ..crypto import sign_request
+from ..moderation import is_domain_blocked
 from ..storage import ActivityPubStorage
 from ._client import get_default_user_agent
 
@@ -54,6 +56,10 @@ class OutboxProcessor:
         thread and ``publish()`` returns immediately after storing the
         activity. This prevents slow or unreachable inboxes from blocking
         the caller.
+    :param allowed_instances: Optional allow-list of remote instance domains.
+        When non-empty, deliveries are only sent to inboxes on these domains.
+    :param blocked_instances: Optional block-list of remote instance domains.
+        Inboxes on these domains are skipped during delivery fan-out.
     """
 
     def __init__(
@@ -70,6 +76,8 @@ class OutboxProcessor:
         user_agent: str | None = None,
         http_timeout: float = 15.0,
         async_delivery: bool = True,
+        allowed_instances: Collection[str] | None = None,
+        blocked_instances: Collection[str] | None = None,
         **_,
     ):
         self.storage = storage
@@ -83,6 +91,8 @@ class OutboxProcessor:
         self.user_agent = user_agent or get_default_user_agent(actor_id)
         self.http_timeout = http_timeout
         self.async_delivery = async_delivery
+        self.allowed_instances = allowed_instances
+        self.blocked_instances = blocked_instances
 
     def _new_activity_id(self) -> str:
         """Generate a unique activity ID."""
@@ -333,6 +343,27 @@ class OutboxProcessor:
                 seen.add(inbox)
                 inboxes.append(inbox)
 
+        # Skip inboxes on blocked or non-allowed instances
+        if self.allowed_instances or self.blocked_instances:
+            unfiltered = inboxes
+            inboxes = [
+                url
+                for url in inboxes
+                if not is_domain_blocked(
+                    url,
+                    allowed=self.allowed_instances,
+                    blocked=self.blocked_instances,
+                )
+            ]
+            skipped = len(unfiltered) - len(inboxes)
+            if skipped:
+                logger.info(
+                    "Skipped %d inbox(es) on blocked/non-allowed instances "
+                    "for activity %s",
+                    skipped,
+                    activity_id,
+                )
+
         logger.info(
             "Delivering activity %s to %d inboxes",
             activity_id,
@@ -541,6 +572,19 @@ class OutboxProcessor:
         seen: set[str] = set()
 
         for actor_url in actor_urls:
+            # Skip blocked/non-allowed recipient instances before fetching
+            # their actor document, so blocked instances are never contacted.
+            if is_domain_blocked(
+                actor_url,
+                allowed=self.allowed_instances,
+                blocked=self.blocked_instances,
+            ):
+                logger.debug(
+                    "Skipping recipient on blocked/non-allowed instance: %s",
+                    actor_url,
+                )
+                continue
+
             actor_data = self._fetch_actor(actor_url)
             if not actor_data:
                 logger.debug("Failed to fetch actor data for %s", actor_url)

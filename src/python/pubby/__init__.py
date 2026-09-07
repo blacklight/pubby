@@ -30,6 +30,7 @@ from .content import (
     render_verified_link,
 )
 from .handlers import ActivityPubHandler
+from .moderation import extract_domain, is_domain_blocked, normalize_domain
 from .storage import ActivityPubStorage
 from .webfinger import Mention, extract_mentions, resolve_actor_url
 
@@ -47,13 +48,16 @@ __all__ = [
     "DeliveryError",
     "DeliveryStatus",
     "display_url",
+    "extract_domain",
     "extract_mentions",
     "Follower",
     "Interaction",
     "InteractionStatus",
     "InteractionType",
+    "is_domain_blocked",
     "is_linkable_url",
     "Mention",
+    "normalize_domain",
     "Object",
     "ObjectType",
     "property_value_attachment",

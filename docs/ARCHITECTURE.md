@@ -57,6 +57,7 @@ src/python/pubby/
 ├── _model.py                # Core data model (dataclasses + enums)
 ├── _exceptions.py           # Exception hierarchy
 ├── _rate_limit.py           # In-memory sliding-window rate limiter
+├── moderation.py            # Instance domain allow/block list helpers
 ├── webfinger.py             # WebFinger client (resolve_actor_url, extract_mentions)
 │
 ├── crypto/
@@ -148,7 +149,27 @@ A simple hierarchy rooted at `ActivityPubError`:
 limiter.  Server adapters optionally pass it to the inbox endpoint; the
 `check(key)` method raises `RateLimitError` when the window is exceeded.
 
-### 4. Crypto — `pubby.crypto`
+### 4. Instance Moderation — `pubby.moderation`
+
+Stdlib-only helpers for per-instance allow/block policy.  The application
+owns the lists (`allowed_instances` / `blocked_instances` on
+`ActivityPubHandler`, forwarded to both processors); Pubby normalizes and
+matches domains and enforces the policy at two seams:
+
+- **Inbound** — `InboxProcessor.process()` drops activities whose `actor`
+  domain is blocked (or not in a non-empty allow-list) *before* signature
+  verification, so rejected instances never trigger an actor key fetch.
+- **Outbound** — `OutboxProcessor` skips inboxes on blocked/non-allowed
+  domains during delivery fan-out, and never fetches recipient actor
+  documents from those domains.
+
+| Function | Purpose |
+|----------|---------|
+| `normalize_domain(value)` | Strip scheme/path/port, lower-case; `""` for empty input |
+| `extract_domain(url_or_actor)` | Hostname of an actor URL, inbox URL, or bare domain |
+| `is_domain_blocked(domain, allowed=None, blocked=None)` | `True` when blocked, or a non-empty allow-list excludes the domain (blocked wins over allowed) |
+
+### 5. Crypto — `pubby.crypto`
 
 Two internal modules, re-exported through `pubby.crypto.__init__`:
 
@@ -167,9 +188,9 @@ with RSA-SHA256.  `sign_request()` returns a dict of headers (`Date`,
 `verify_request()` reconstructs the signing string, verifies the RSA
 signature, and optionally checks the `Digest` header.
 
-### 5. Handlers — `pubby.handlers`
+### 6. Handlers — `pubby.handlers`
 
-#### 5.1 `ActivityPubHandler` (façade)
+#### 6.1 `ActivityPubHandler` (façade)
 
 The single entry point consumers interact with.  Accepts an
 `ActivityPubStorage`, an `ActorConfig` (or dict), and a private key.
@@ -198,7 +219,7 @@ Public methods:
 | `render_interaction(interaction)` | Render a single interaction as HTML. |
 | `render_interactions(interactions)` | Render a list of interactions as HTML. |
 
-#### 5.2 `InboxProcessor`
+#### 6.2 `InboxProcessor`
 
 Dispatches incoming activities by type via a handler map:
 
@@ -216,12 +237,15 @@ QuoteRequest → _handle_quote_request (FEP-044f: auto-approve quotes)
 ```
 
 Before dispatching, `verify_signature()` checks the HTTP Signature header
-by fetching the sender's public key (with actor caching).
+by fetching the sender's public key (with actor caching).  When
+`allowed_instances`/`blocked_instances` are configured, the activity's
+`actor` domain is checked first and rejected instances are dropped without
+any network call (see `pubby.moderation`).
 
 The `on_interaction_received` callback is invoked after every new
 interaction is stored, enabling application-level notifications.
 
-#### 5.3 `OutboxProcessor`
+#### 6.3 `OutboxProcessor`
 
 Responsible for:
 
@@ -235,21 +259,24 @@ Responsible for:
    When `async_delivery=True`, delivery runs in a background daemon thread
    so `publish()` returns immediately without blocking on slow/unreachable
    inboxes.
+   Collected inboxes are filtered against the configured instance
+   allow/block lists (`pubby.moderation`), and recipient actor documents
+   on blocked/non-allowed domains are never fetched.
 3. **Retry** — `_deliver_with_retry()` uses exponential backoff
    (`retry_base_delay × 2^attempt`); 5xx responses and connection errors
    are retried, 4xx errors are not.
 
-#### 5.4 `_discovery`
+#### 6.4 `_discovery`
 
 Pure functions that build WebFinger JRD (RFC 7033) and NodeInfo 2.1
 response dicts.
 
-#### 5.5 `_client`
+#### 6.5 `_client`
 
 `get_default_user_agent(actor_id)` returns the default `User-Agent` string
 (`pubby/{version} (+{actor_id})`).
 
-### 6. WebFinger Client — `pubby.webfinger`
+### 7. WebFinger Client — `pubby.webfinger`
 
 - **`resolve_actor_url(username, domain)`** — performs a WebFinger lookup
   and returns the `self` link, falling back to
@@ -259,9 +286,9 @@ response dicts.
 - **`Mention`** dataclass — carries `username`, `domain`, `actor_url`,
   plus helpers `acct` (property) and `to_tag()` (→ AP Mention tag dict).
 
-### 7. Storage — `pubby.storage`
+### 8. Storage — `pubby.storage`
 
-#### 7.1 Abstract Base — `ActivityPubStorage`
+#### 8.1 Abstract Base — `ActivityPubStorage`
 
 Defines the contract every storage backend must fulfill:
 
@@ -277,7 +304,7 @@ Defines the contract every storage backend must fulfill:
 have default (no-op) implementations so existing custom backends don't
 break when Pubby adds new features.
 
-#### 7.2 SQLAlchemy Adapter — `pubby.storage.adapters.db`
+#### 8.2 SQLAlchemy Adapter — `pubby.storage.adapters.db`
 
 - **Mixin models** (`_model.py`): `DbFollower`, `DbInteraction`,
   `DbActivity`, `DbActorCache` — framework-neutral SQLAlchemy column
@@ -294,7 +321,7 @@ break when Pubby adds new features.
   `ap_actor_cache`), calls `create_all()`, and returns a ready-to-use
   `DbActivityPubStorage`.
 
-#### 7.3 File Adapter — `pubby.storage.adapters.file`
+#### 8.3 File Adapter — `pubby.storage.adapters.file`
 
 `FileActivityPubStorage` stores entities as individual JSON files in a
 directory tree:
@@ -329,7 +356,7 @@ automatically runs any pending migrations (e.g., rebuilding indexes).
 Pass `auto_migrate=False` to disable.  The current schema version is 4,
 which adds `target_actor_id` to follower records.
 
-### 8. Render — `pubby.render`
+### 9. Render — `pubby.render`
 
 `InteractionsRenderer` uses Jinja2 (`PackageLoader` on the `templates/`
 directory) to produce safe HTML `Markup` for interactions.
@@ -347,7 +374,7 @@ HTML sanitization (`_sanitize_html`) strips disallowed tags and attributes
 via regex, permitting a safe subset (links, basic formatting,
 blockquotes, lists) and only `http`/`https` href schemes.
 
-### 9. Content Rendering — `pubby.content`
+### 10. Content Rendering — `pubby.content`
 
 A stdlib-only module that produces outbound ActivityPub HTML from local plain
 text.  It is intentionally independent of `pubby.render` (which sanitises
@@ -366,7 +393,7 @@ validated `http`/`https` URLs.
 - **`property_value_attachment(name, url, label=None)`** — builds a
   `PropertyValue` dict suitable for `ActorConfig.attachment`.
 
-### 10. Server Adapters — `pubby.server.adapters`
+### 11. Server Adapters — `pubby.server.adapters`
 
 Each framework gets two modules:
 
@@ -396,13 +423,13 @@ All `bind_activitypub()` functions register the same set of routes:
 The `prefix` (default `/ap`) is configurable.  The inbox route
 optionally applies the `RateLimiter`.
 
-### 11. Mastodon-Compatible API — `pubby.server.mastodon`
+### 12. Mastodon-Compatible API — `pubby.server.mastodon`
 
 A read-only subset of the
 [Mastodon REST API](https://docs.joinmastodon.org/methods/) so that
 Mastodon clients and crawlers can discover the instance.
 
-#### 10.1 Mappers (`_mappers.py`)
+#### 12.1 Mappers (`_mappers.py`)
 
 Pure functions that convert Pubby/AP types to Mastodon JSON shapes:
 
@@ -414,7 +441,7 @@ Pure functions that convert Pubby/AP types to Mastodon JSON shapes:
 | `tag_to_mastodon_tag()` | Hashtag → Mastodon Tag |
 | `stable_id()` / `id_to_url()` | Deterministic, reversible URL-safe base64 IDs |
 
-#### 10.2 Route Handlers (`_routes.py`)
+#### 12.2 Route Handlers (`_routes.py`)
 
 `MastodonAPI` is a stateless class whose methods return
 `(body, status_code)` tuples.  Framework adapters call these methods and
@@ -444,13 +471,14 @@ pubby.__init__
   ├── pubby._model            (dataclasses, enums, AP_CONTEXT)
   ├── pubby._exceptions       (exception hierarchy)
   ├── pubby._rate_limit       (RateLimiter)
+  ├── pubby.moderation         (instance domain allow/block helpers)
   ├── pubby.content            (plain-text HTML renderers, Hashtag tag builder)
   ├── pubby.webfinger          (Mention, resolve_actor_url, extract_mentions)
   ├── pubby.crypto             (_keys, _signatures)
   ├── pubby.handlers           (ActivityPubHandler)
   │     ├── _handler.py
-  │     │     ├── _inbox.py    → crypto, storage, _model, _exceptions
-  │     │     ├── _outbox.py   → crypto, storage, _model
+  │     │     ├── _inbox.py    → crypto, storage, _model, _exceptions, moderation
+  │     │     ├── _outbox.py   → crypto, storage, _model, moderation
   │     │     ├── _discovery.py (pure functions)
   │     │     └── _client.py   (User-Agent helper)
   │     └── render/            → _model, jinja2, markupsafe

@@ -37,6 +37,7 @@
   - [`ActivityPubHandler` Parameters](#activitypubhandler-parameters)
   - [`actor_config`](#actor_config)
     - [Profile Metadata (Verified Links)](#profile-metadata-verified-links)
+  - [Instance Allow/Block Lists](#instance-allowblock-lists)
 - [Rendering Interactions](#rendering-interactions)
 - [Rate Limiting](#rate-limiting)
 - [Interaction Callbacks](#interaction-callbacks)
@@ -566,6 +567,8 @@ always pass `target_actor_id` for precise removal.
 | `software_name` | `str` | `"pubby"` | NodeInfo software name |
 | `software_version` | `str` | `"0.0.1"` | NodeInfo software version |
 | `async_delivery` | `bool` | `True` | Run delivery fan-out in background thread (non-blocking) |
+| `allowed_instances` | `Collection[str]` | `None` | Only federate with these instance domains (allow-list) |
+| `blocked_instances` | `Collection[str]` | `None` | Never federate with these instance domains (block-list) |
 
 ### `actor_config`
 
@@ -646,6 +649,52 @@ handler = ActivityPubHandler(
     },
     private_key=private_key,
 )
+```
+
+### Instance Allow/Block Lists
+
+Restrict federation to a known set of instances — or block specific ones —
+with the `allowed_instances` and `blocked_instances` handler parameters:
+
+```python
+handler = ActivityPubHandler(
+    storage=storage,
+    actor_config={...},
+    private_key=private_key,
+    # Only federate with these instances (optional)
+    allowed_instances=["mastodon.social", "pixelfed.social"],
+    # Never federate with these instances (optional)
+    blocked_instances=["spam.example"],
+)
+```
+
+Both lists accept bare domains or URLs — comparisons are case-insensitive and
+ignore schemes, paths, and ports. When `allowed_instances` is non-empty, only
+those instances are permitted; `blocked_instances` always wins over
+`allowed_instances`. Leaving both unset (the default) disables filtering.
+
+The policy is enforced in two places:
+
+- **Inbound**: incoming activities whose `actor` domain is blocked (or not in
+  the allow-list) are dropped *before* HTTP signature verification, so
+  rejected instances never trigger an actor key fetch.
+- **Outbound**: inboxes on blocked/non-allowed domains are skipped during
+  delivery fan-out, and recipient actor documents on those domains are never
+  fetched.
+
+The same helpers are available for application-level checks:
+
+```python
+from pubby import extract_domain, is_domain_blocked, normalize_domain
+
+is_domain_blocked(
+    "https://spam.example/users/bot",
+    allowed=["good.example"],
+    blocked=["spam.example"],
+)  # True
+
+extract_domain("https://spam.example/users/bot")  # "spam.example"
+normalize_domain("HTTPS://Example.COM:8443/path")  # "example.com"
 ```
 
 ## Rendering Interactions

@@ -69,6 +69,11 @@ class ActivityPubHandler:
         Set it to ``False`` for synchronous delivery (easier to debug, errors
         appear in the same stack trace as the caller, but it may cause delays
         upon failed deliveries).
+    :param allowed_instances: Optional allow-list of remote instance domains.
+        When non-empty, only these instances may send activities to the inbox
+        or receive deliveries.
+    :param blocked_instances: Optional block-list of remote instance domains.
+        Activities from, and deliveries to, these instances are dropped.
     """
 
     def __init__(
@@ -90,6 +95,8 @@ class ActivityPubHandler:
         software_name: str = "pubby",
         software_version: str = "0.0.1",
         async_delivery: bool = True,
+        allowed_instances: Collection[str] | None = None,
+        blocked_instances: Collection[str] | None = None,
     ):
         self.storage = storage
 
@@ -153,6 +160,8 @@ class ActivityPubHandler:
             auto_approve_quotes=auto_approve_quotes,
             store_local_only=store_local_only,
             local_base_urls=local_base_urls,
+            allowed_instances=allowed_instances,
+            blocked_instances=blocked_instances,
         )
 
         self.outbox = OutboxProcessor(
@@ -166,6 +175,8 @@ class ActivityPubHandler:
             user_agent=user_agent,
             http_timeout=http_timeout,
             async_delivery=async_delivery,
+            allowed_instances=allowed_instances,
+            blocked_instances=blocked_instances,
         )
 
         self.renderer = InteractionsRenderer()

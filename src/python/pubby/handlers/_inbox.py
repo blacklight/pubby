@@ -5,7 +5,7 @@ Inbox processing — dispatch incoming activities by type.
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Callable
+from typing import Callable, Collection
 
 import requests
 
@@ -24,6 +24,7 @@ from .._model import (
 from .._exceptions import ActivityPubError, SignatureVerificationError
 from ..crypto import sign_request, verify_request
 from ..crypto._keys import load_public_key
+from ..moderation import extract_domain, is_domain_blocked
 from ..storage import ActivityPubStorage
 from ._client import get_default_user_agent
 
@@ -50,6 +51,12 @@ class InboxProcessor:
         is still invoked for all interactions.
     :param local_base_urls: List of base URLs considered "local". If empty,
         defaults to the actor's base URL (derived from ``actor_id``).
+    :param allowed_instances: Optional allow-list of remote instance domains.
+        When non-empty, only activities from actors on these domains are
+        processed.
+    :param blocked_instances: Optional block-list of remote instance domains.
+        Activities from actors on these domains are dropped before signature
+        verification.
     """
 
     def __init__(
@@ -65,6 +72,8 @@ class InboxProcessor:
         auto_approve_quotes: bool = True,
         store_local_only: bool = False,
         local_base_urls: list[str] | None = None,
+        allowed_instances: Collection[str] | None = None,
+        blocked_instances: Collection[str] | None = None,
     ):
         self.storage = storage
         self.actor_id = actor_id
@@ -76,6 +85,8 @@ class InboxProcessor:
         self.auto_approve_quotes = auto_approve_quotes
         self.store_local_only = store_local_only
         self.local_base_urls = local_base_urls or []
+        self.allowed_instances = allowed_instances
+        self.blocked_instances = blocked_instances
 
     def _is_local_target(self, target_resource: str) -> bool:
         """Check if target_resource is considered local."""
@@ -212,6 +223,25 @@ class InboxProcessor:
             (for testing only).
         :return: Response data or None.
         """
+        # Instance allow/block check — runs before signature verification so
+        # rejected instances are dropped without fetching the actor's key.
+        actor_value = (
+            activity_data.get("actor") if isinstance(activity_data, dict) else None
+        )
+        if isinstance(actor_value, dict):
+            actor_value = actor_value.get("id")
+        if isinstance(actor_value, str) and is_domain_blocked(
+            actor_value,
+            allowed=self.allowed_instances,
+            blocked=self.blocked_instances,
+        ):
+            logger.info(
+                "Dropping inbound activity %s from blocked instance %s",
+                activity_data.get("id", ""),
+                extract_domain(actor_value),
+            )
+            return None
+
         if not skip_verification and headers:
             self.verify_signature(method, path, headers, body)
 

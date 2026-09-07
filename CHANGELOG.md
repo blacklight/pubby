@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- **Instance allow/block lists**: new `pubby.moderation` module with
+  `normalize_domain`, `extract_domain`, and `is_domain_blocked` helpers, plus
+  `allowed_instances`/`blocked_instances` parameters on `ActivityPubHandler`.
+  Incoming activities from blocked (or non-allowed) actor domains are dropped
+  before signature verification, and outbound delivery skips inboxes on
+  blocked/non-allowed domains.
+
 ## 0.2.23
 
 ### Added
