@@ -117,7 +117,7 @@ and `build()` (← JSON-LD) round-trip methods.
 |-------|---------|
 | `ActorConfig` | Typed configuration for an ActivityPub actor (base URL, username, bio, type, attachments, …). Accepts a plain `dict` via `from_dict()` for backwards compatibility. |
 | `Actor` | Full ActivityPub Actor document with public key, endpoints, and `to_dict()` serialization. |
-| `Object` | ActivityPub Object (Note, Article, Image, …). Supports `mediaType`, `contentMap`, `quoteControl`, `interactionPolicy`. |
+| `Object` | ActivityPub Object (Note, Article, Image, …). Supports `mediaType`, `contentMap`, `quoteControl`, `interactionPolicy`, and `duration`. `url` accepts `str` or a list of `Link` dicts; `attributedTo` accepts `str` or `list[str]` (federated media shapes such as `Audio`). |
 | `Activity` | ActivityPub Activity wrapper (Create, Follow, Like, …). |
 | `Interaction` | Stored interaction from a remote actor — maps AP activities to a displayable format (analogous to a Webmention). |
 | `Follower` | Stored follower record (actor ID, inbox, shared inbox, cached actor data, plus `target_actor_id` identifying the local actor being followed). |
@@ -395,6 +395,13 @@ validated `http`/`https` URLs.
   hashtag processing.
 - **`build_hashtag_tags(names, hashtag_url)`** — maps normalized tag names to
   ActivityPub `Hashtag` tag dicts, preserving order and without deduplication.
+- **`set_object_content(obj, text, hashtag_url)`** — renders plain text into
+  `obj['content']` and merges detected hashtags into `obj['tag']`,
+  deduplicating case-insensitively against existing tag names.  A no-op on
+  empty text; composes `render_post_html` + `build_hashtag_tags`.
+- **`format_duration(seconds)`** — formats a number of seconds as an
+  ISO-8601 `PT[h]H[m]M[s]S` duration string, for the `duration` field of
+  `Audio`/`Video` objects.
 - **`render_verified_link(url, label=None)`** — renders a `rel="me"` anchor for
   valid URLs or escaped text for invalid ones.
 - **`property_value_attachment(name, url, label=None)`** — builds a
@@ -479,7 +486,8 @@ pubby.__init__
   ├── pubby._exceptions       (exception hierarchy)
   ├── pubby._rate_limit       (RateLimiter)
   ├── pubby.moderation         (instance domain allow/block helpers)
-  ├── pubby.content            (plain-text HTML renderers, Hashtag tag builder)
+  ├── pubby.content            (plain-text HTML renderers, Hashtag tag builder,
+  │                             object content/duration helpers)
   ├── pubby.webfinger          (Mention, resolve_actor_url, extract_mentions)
   ├── pubby.crypto             (_keys, _signatures)
   ├── pubby.handlers           (ActivityPubHandler)

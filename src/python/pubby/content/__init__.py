@@ -13,7 +13,7 @@ stdlib.
 import html
 import re
 from dataclasses import dataclass
-from typing import Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import urlparse
 
 # Matches http(s) URLs in free text.  It stops before whitespace and
@@ -256,3 +256,73 @@ def property_value_attachment(
         "name": name,
         "value": render_verified_link(url, label=label),
     }
+
+
+def format_duration(seconds: float) -> str:
+    """
+    Format a number of seconds as an ISO-8601 duration string.
+
+    Suitable for the ``duration`` field of media objects (``Audio``,
+    ``Video``).  The value is truncated toward zero; hours and minutes are
+    only emitted when non-zero.  Negative values are treated as zero.
+
+    Examples::
+
+        format_duration(3.0)    -> "PT3S"
+        format_duration(63.9)   -> "PT1M3S"
+        format_duration(3723.0) -> "PT1H2M3S"
+        format_duration(0)      -> "PT0S"
+
+    :param seconds: Duration in seconds.
+    :return: An ISO-8601 ``PT[h]H[m]M[s]S`` string.
+    """
+    total = int(seconds)
+    if total <= 0:
+        return "PT0S"
+
+    hours, rem = divmod(total, 3600)
+    minutes, secs = divmod(rem, 60)
+
+    duration = "PT"
+    if hours:
+        duration += f"{hours}H"
+    if minutes:
+        duration += f"{minutes}M"
+    if secs:
+        duration += f"{secs}S"
+    return duration
+
+
+def set_object_content(
+    obj: Dict[str, Any], text: str, hashtag_url: Callable[[str], str]
+) -> None:
+    """
+    Set ``obj['content']`` from rendered plain text and merge detected
+    hashtags into ``obj['tag']``.
+
+    The text is rendered via :func:`render_post_html` — escaped, with URLs
+    and ``#hashtags`` linkified.  Hashtags found in the text are appended
+    to the object's ``tag`` list as ``Hashtag`` dicts, deduplicating
+    (case-insensitively) against existing tag names so app-generated tags
+    (e.g. genre hashtags) are preserved.
+
+    This is a no-op when ``text`` is empty or blank.
+
+    :param obj: The ActivityPub object dictionary to modify in place.
+    :param text: Plain-text description or caption.
+    :param hashtag_url: Callable that maps a normalized hashtag name to
+        its local URL.
+    """
+    if not text or not text.strip():
+        return
+
+    rendered = render_post_html(text, hashtag_url)
+    if rendered.html:
+        obj["content"] = rendered.html
+    if not rendered.hashtags:
+        return
+
+    tags = obj.setdefault("tag", [])
+    seen = {str(tag.get("name", "")).lower() for tag in tags if isinstance(tag, dict)}
+    new_names = [name for name in rendered.hashtags if f"#{name}" not in seen]
+    tags.extend(build_hashtag_tags(new_names, hashtag_url))

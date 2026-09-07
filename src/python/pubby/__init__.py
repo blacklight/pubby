@@ -22,12 +22,14 @@ from .content import (
     RenderedContent,
     build_hashtag_tags,
     display_url,
+    format_duration,
     is_linkable_url,
     property_value_attachment,
     render_bio_html,
     render_link_anchor,
     render_post_html,
     render_verified_link,
+    set_object_content,
 )
 from .handlers import ActivityPubHandler
 from .moderation import extract_domain, is_domain_blocked, normalize_domain
@@ -51,6 +53,7 @@ __all__ = [
     "extract_domain",
     "extract_mentions",
     "Follower",
+    "format_duration",
     "Interaction",
     "InteractionStatus",
     "InteractionType",
@@ -69,5 +72,6 @@ __all__ = [
     "render_verified_link",
     "RenderedContent",
     "resolve_actor_url",
+    "set_object_content",
     "SignatureVerificationError",
 ]

@@ -211,6 +211,103 @@ class TestObject:
         obj = Object(id="x", content="test")
         assert "mediaType" not in obj.to_dict()
 
+    def test_url_as_link_list_roundtrip(self):
+        links = [
+            {
+                "type": "Link",
+                "href": "https://example.com/files/1/download",
+                "mediaType": "audio/mpeg",
+            },
+            {
+                "type": "Link",
+                "href": "https://example.com/tracks/1",
+                "mediaType": "text/html",
+            },
+        ]
+        obj = Object(id="x", type="Audio", url=links)
+        doc = obj.to_dict()
+        assert doc["url"] == links
+
+        rebuilt = Object.build(doc)
+        assert rebuilt.url == links
+
+    def test_url_string_unchanged(self):
+        obj = Object(id="x", url="https://example.com/posts/1")
+        doc = obj.to_dict()
+        assert doc["url"] == "https://example.com/posts/1"
+        assert Object.build(doc).url == "https://example.com/posts/1"
+
+    def test_url_omitted_when_empty(self):
+        obj = Object(id="x")
+        assert "url" not in obj.to_dict()
+        assert "url" not in Object(id="x", url=[]).to_dict()
+
+    def test_attributed_to_as_list_roundtrip(self):
+        actors = [
+            "https://example.com/artists/1",
+            "https://example.com/ap/actor",
+        ]
+        obj = Object(id="x", type="Audio", attributed_to=actors)
+        doc = obj.to_dict()
+        assert doc["attributedTo"] == actors
+
+        rebuilt = Object.build(doc)
+        assert rebuilt.attributed_to == actors
+
+    def test_attributed_to_string_unchanged(self):
+        obj = Object(id="x", attributed_to="https://example.com/ap/actor")
+        doc = obj.to_dict()
+        assert doc["attributedTo"] == "https://example.com/ap/actor"
+        assert Object.build(doc).attributed_to == "https://example.com/ap/actor"
+
+    def test_duration_emitted_verbatim(self):
+        obj = Object(id="x", type="Audio", duration="PT1H2M3S")
+        doc = obj.to_dict()
+        assert doc["duration"] == "PT1H2M3S"
+
+        rebuilt = Object.build(doc)
+        assert rebuilt.duration == "PT1H2M3S"
+
+    def test_duration_omitted_when_none(self):
+        obj = Object(id="x", type="Audio")
+        assert "duration" not in obj.to_dict()
+        assert Object.build(obj.to_dict()).duration is None
+
+    def test_audio_object_roundtrip(self):
+        obj = Object(
+            id="https://example.com/tracks/1",
+            type="Audio",
+            name="Track title",
+            url=[
+                {
+                    "type": "Link",
+                    "href": "https://example.com/files/1/download",
+                    "mediaType": "audio/mpeg",
+                },
+                {
+                    "type": "Link",
+                    "href": "https://example.com/tracks/1",
+                    "mediaType": "text/html",
+                },
+            ],
+            attributed_to=[
+                "https://example.com/artists/1",
+                "https://example.com/ap/actor",
+            ],
+            duration="PT3M5S",
+            attachment=[
+                {
+                    "type": "Document",
+                    "mediaType": "audio/mpeg",
+                    "url": "https://example.com/files/1/download",
+                    "name": "Track title",
+                }
+            ],
+        )
+        doc = obj.to_dict()
+        rebuilt = Object.build(doc)
+        assert rebuilt.to_dict() == doc
+
 
 class TestActivity:
     def test_build_and_to_dict(self):

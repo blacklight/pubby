@@ -185,6 +185,39 @@ class TestActivityToStatus:
         assert len(status["tags"]) == 1
         assert status["tags"][0]["name"] == "python"
 
+    def test_object_url_as_link_list_prefers_html(self):
+        handler = _make_handler()
+        activity = _store_sample_activity(handler)
+        activity["object"]["type"] = "Audio"
+        activity["object"]["url"] = [
+            {
+                "type": "Link",
+                "href": "https://blog.example.com/files/1/download",
+                "mediaType": "audio/mpeg",
+            },
+            {
+                "type": "Link",
+                "href": "https://blog.example.com/posts/hello",
+                "mediaType": "text/html",
+            },
+        ]
+        status = activity_to_status(activity, handler)
+        assert status["url"] == "https://blog.example.com/posts/hello"
+        assert isinstance(status["url"], str)
+
+    def test_object_url_as_link_list_falls_back_to_first_href(self):
+        handler = _make_handler()
+        activity = _store_sample_activity(handler)
+        activity["object"]["url"] = [
+            {
+                "type": "Link",
+                "href": "https://blog.example.com/files/1/download",
+                "mediaType": "audio/mpeg",
+            }
+        ]
+        status = activity_to_status(activity, handler)
+        assert status["url"] == "https://blog.example.com/files/1/download"
+
 
 class TestFollowerToAccount:
     def test_basic_fields(self):

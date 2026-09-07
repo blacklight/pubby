@@ -111,6 +111,40 @@ def _extract_object(activity: dict) -> dict:
     return obj if isinstance(obj, dict) else {}
 
 
+def _object_url(obj: dict, fallback: str) -> str:
+    """
+    Extract a single displayable URL from an object's ``url`` field.
+
+    ``url`` may be a string, a ``Link`` dict, or a list mixing both (e.g.
+    ``Audio`` objects carrying a stream link plus an HTML page link).
+    Plain strings and ``text/html``/``rel=alternate`` links are preferred;
+    otherwise the first link's ``href`` wins.
+    """
+    url = obj.get("url")
+    entries = url if isinstance(url, list) else [url]
+    first_href = ""
+
+    for entry in entries:
+        if isinstance(entry, str):
+            href, preferred = entry, True
+        elif isinstance(entry, dict):
+            href = entry.get("href") or ""
+            preferred = (
+                entry.get("mediaType") == "text/html" or entry.get("rel") == "alternate"
+            )
+        else:
+            continue
+
+        if not href:
+            continue
+        if preferred:
+            return href
+        if not first_href:
+            first_href = href
+
+    return first_href or fallback
+
+
 def _map_media_attachments(attachments: list[dict]) -> list[dict[str, Any]]:
     """Map AP attachments to Mastodon MediaAttachment entities."""
     result: list[dict[str, Any]] = []
@@ -200,7 +234,7 @@ def activity_to_status(
 
     obj = _extract_object(activity)
     object_id = obj.get("id", activity.get("id", ""))
-    object_url = obj.get("url", object_id)
+    object_url = _object_url(obj, object_id)
 
     content = obj.get("content", "")
     language = None

@@ -309,14 +309,20 @@ class Actor:
 class Object:
     """
     An ActivityPub Object (Note, Article, Image, etc.).
+
+    ``url`` accepts either a plain string or a list of ``Link`` dicts
+    (e.g. an ``Audio`` object carrying both a stream link and an HTML page
+    link). ``attributed_to`` accepts a single actor URL or a list of actor
+    URLs. ``duration`` is emitted verbatim and should be an ISO-8601
+    duration string (see ``pubby.content.format_duration``).
     """
 
     id: str
     type: str = "Note"
     name: str | None = None
     content: str = ""
-    url: str = ""
-    attributed_to: str = ""
+    url: str | list[dict] = ""
+    attributed_to: str | list[str] = ""
     in_reply_to: str | None = None
     published: datetime | None = None
     updated: datetime | None = None
@@ -331,6 +337,7 @@ class Object:
     quote_control: dict | None = None
     quote_policy: str | None = None
     interaction_policy: dict | None = None
+    duration: str | None = None
 
     def to_dict(self) -> dict:
         """Return the ActivityPub JSON-LD representation."""
@@ -374,6 +381,8 @@ class Object:
             doc["quotePolicy"] = self.quote_policy
         if self.interaction_policy is not None:
             doc["interactionPolicy"] = self.interaction_policy
+        if self.duration:
+            doc["duration"] = self.duration
 
         return doc
 
@@ -412,6 +421,7 @@ class Object:
             quote_control=data.get("quoteControl"),
             quote_policy=data.get("quotePolicy"),
             interaction_policy=data.get("interactionPolicy"),
+            duration=data.get("duration"),
         )
 
 

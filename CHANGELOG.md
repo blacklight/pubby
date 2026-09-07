@@ -21,6 +21,18 @@ All notable changes to this project will be documented in this file.
   PEM private key (mode `0o600`, parents created) when the file is missing or
   empty, returning the resolved path for `ActivityPubHandler`'s
   `private_key_path` parameter.
+- **Federated media object support**: `Object.url` now accepts a list of
+  `Link` dicts and `Object.attributed_to` a list of actor URLs (in addition
+  to the existing plain-string forms), and a new `duration` field is emitted
+  verbatim — covering the `Audio`/`Video` shapes used by media-hosting
+  servers.
+- `pubby.content.format_duration` formats seconds as an ISO-8601
+  `PT[h]H[m]M[s]S` duration string, and `pubby.content.set_object_content`
+  renders plain text into an object dict's `content` field while merging
+  detected hashtags into its `tag` list without duplicating existing tags.
+- The Mastodon `activity_to_status` mapper now extracts a single displayable
+  URL from objects whose `url` is a list of `Link` dicts, preferring
+  `text/html`/`rel="alternate"` entries.
 
 ## 0.2.23
 

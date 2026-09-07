@@ -12,12 +12,14 @@ from pubby import (
     RenderedContent,
     build_hashtag_tags,
     display_url,
+    format_duration,
     is_linkable_url,
     property_value_attachment,
     render_bio_html,
     render_link_anchor,
     render_post_html,
     render_verified_link,
+    set_object_content,
 )
 
 
@@ -318,3 +320,161 @@ class TestPropertyValueAttachment:
                 "value": '<a href="https://e.com" rel="me">e.com</a>',
             },
         ]
+
+
+class TestFormatDuration:
+    def test_seconds_only(self):
+        assert format_duration(3.0) == "PT3S"
+        assert format_duration(59) == "PT59S"
+
+    def test_minutes(self):
+        assert format_duration(60) == "PT1M"
+        assert format_duration(185) == "PT3M5S"
+
+    def test_hours(self):
+        assert format_duration(3600) == "PT1H"
+        assert format_duration(3723.0) == "PT1H2M3S"
+
+    def test_truncates_fractional_seconds(self):
+        assert format_duration(63.9) == "PT1M3S"
+        assert format_duration(0.5) == "PT0S"
+
+    def test_zero_and_negative(self):
+        assert format_duration(0) == "PT0S"
+        assert format_duration(-42) == "PT0S"
+
+
+class TestSetObjectContent:
+    def test_sets_content_and_tags(self, hashtag_url):
+        obj: dict = {"type": "Audio"}
+        set_object_content(obj, "New track! #rock https://e.com/t", hashtag_url)
+
+        assert obj["content"] == (
+            "New track! "
+            '<a href="https://blog.example.com/tags/rock" rel="tag">#rock</a> '
+            '<a href="https://e.com/t">e.com/t</a>'
+        )
+        assert obj["tag"] == [
+            {
+                "type": "Hashtag",
+                "name": "#rock",
+                "href": "https://blog.example.com/tags/rock",
+            }
+        ]
+
+    def test_merges_with_existing_tags(self, hashtag_url):
+        obj = {
+            "type": "Audio",
+            "tag": [
+                {
+                    "type": "Hashtag",
+                    "name": "#jazz",
+                    "href": "https://blog.example.com/tags/jazz",
+                }
+            ],
+        }
+        set_object_content(obj, "Live set #jazz #fusion", hashtag_url)
+
+        names = [t["name"] for t in obj["tag"]]
+        assert names == ["#jazz", "#fusion"]
+
+    def test_dedup_is_case_insensitive(self, hashtag_url):
+        obj = {
+            "type": "Audio",
+            "tag": [
+                {
+                    "type": "Hashtag",
+                    "name": "#Rock",
+                    "href": "https://blog.example.com/tags/Rock",
+                }
+            ],
+        }
+        set_object_content(obj, "Out now #rock", hashtag_url)
+        assert [t["name"] for t in obj["tag"]] == ["#Rock"]
+
+    def test_noop_on_empty_or_blank_text(self, hashtag_url):
+        obj: dict = {"type": "Audio"}
+        set_object_content(obj, "", hashtag_url)
+        set_object_content(obj, "   \n", hashtag_url)
+        assert "content" not in obj
+        assert "tag" not in obj
+
+    def test_text_without_hashtags_leaves_tag_untouched(self, hashtag_url):
+        obj = {
+            "type": "Audio",
+            "tag": [{"type": "Mention", "name": "@alice", "href": "https://e.com/a"}],
+        }
+        set_object_content(obj, "Just a description.", hashtag_url)
+        assert obj["content"] == "Just a description."
+        assert obj["tag"] == [
+            {"type": "Mention", "name": "@alice", "href": "https://e.com/a"}
+        ]
+
+    def test_publish_audio_object_integration(self, private_key, hashtag_url):
+        """publish_object produces a Create(Audio) in the federated shape."""
+        storage = MagicMock()
+        storage.get_followers.return_value = []
+        storage.get_activities.return_value = []
+
+        handler = ActivityPubHandler(
+            storage=storage,
+            actor_config={
+                "base_url": "https://blog.example.com",
+                "username": "blog",
+                "name": "Test Blog",
+            },
+            private_key=private_key,
+            async_delivery=False,
+        )
+
+        stream_url = "https://blog.example.com/files/1/download"
+        track_url = "https://blog.example.com/tracks/1"
+        audio = Object(
+            id=track_url,
+            type="Audio",
+            name="Track title",
+            url=[
+                {"type": "Link", "href": stream_url, "mediaType": "audio/mpeg"},
+                {"type": "Link", "href": track_url, "mediaType": "text/html"},
+            ],
+            attributed_to=[
+                "https://blog.example.com/artists/1",
+                handler.actor_id,
+            ],
+            duration=format_duration(185),
+            tag=build_hashtag_tags(["jazz"], hashtag_url),
+            attachment=[
+                {
+                    "type": "Document",
+                    "mediaType": "audio/mpeg",
+                    "url": stream_url,
+                    "name": "Track title",
+                }
+            ],
+        )
+
+        obj_dict = audio.to_dict()
+        set_object_content(obj_dict, "Live set #jazz #fusion", hashtag_url)
+        audio.content = obj_dict["content"]
+        audio.tag = obj_dict["tag"]
+
+        with patch.object(
+            handler.outbox, "publish", side_effect=lambda activity: activity
+        ):
+            activity = handler.publish_object(audio)
+
+        assert activity["type"] == "Create"
+        published = activity["object"]
+        assert published["type"] == "Audio"
+        assert published["url"] == [
+            {"type": "Link", "href": stream_url, "mediaType": "audio/mpeg"},
+            {"type": "Link", "href": track_url, "mediaType": "text/html"},
+        ]
+        assert published["attributedTo"] == [
+            "https://blog.example.com/artists/1",
+            handler.actor_id,
+        ]
+        assert published["duration"] == "PT3M5S"
+        assert [t["name"] for t in published["tag"]] == ["#jazz", "#fusion"]
+        assert "#jazz" in published["content"]
+        assert published["attachment"][0]["type"] == "Document"

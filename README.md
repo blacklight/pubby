@@ -364,6 +364,23 @@ post = Object(
 handler.publish_object(post)
 ```
 
+For object *dictionaries* — e.g. `Audio`/`Video` payloads you build by hand —
+`set_object_content` does the same in one call: it renders the text into
+`obj["content"]` and appends any detected hashtags to `obj["tag"]`,
+deduplicating against tags you already set:
+
+```python
+from pubby import set_object_content
+
+obj = {
+  "type": "Audio",
+  "id": "https://example.com/tracks/1",
+  "tag": build_hashtag_tags(["jazz"], hashtag_url),
+}
+set_object_content(obj, "Live set #jazz #fusion", hashtag_url)
+# obj["content"] holds rendered HTML; obj["tag"] now includes #fusion
+```
+
 For bios that should only linkify URLs, use `render_bio_html` on the `summary`
 field:
 
@@ -867,7 +884,47 @@ obj = Object(
 
 Key fields: `id`, `type`, `name`, `content`, `url`, `attributed_to`,
 `published`, `updated`, `summary`, `to`, `cc`, `tag`, `media_type`,
-`quote_control`, `quote_policy`, `interaction_policy`.
+`quote_control`, `quote_policy`, `interaction_policy`, `duration`.
+
+`url` also accepts a list of `Link` dicts, and `attributed_to` a list of
+actor URLs — the shapes used by federated media objects such as `Audio`:
+
+```python
+from pubby import Object, format_duration
+
+audio = Object(
+    id="https://example.com/tracks/1",
+    type="Audio",
+    name="Track title",
+    url=[
+        {
+            "type": "Link",
+            "href": "https://example.com/files/1/download",
+            "mediaType": "audio/mpeg",
+        },
+        {
+            "type": "Link",
+            "href": "https://example.com/tracks/1",
+            "mediaType": "text/html",
+        },
+    ],
+    attributed_to=[
+        "https://example.com/artists/1",
+        "https://example.com/ap/actor",
+    ],
+    duration=format_duration(185),  # "PT3M5S", serialized as "duration"
+    attachment=[
+        {
+            "type": "Document",
+            "mediaType": "audio/mpeg",
+            "url": "https://example.com/files/1/download",
+            "name": "Track title",
+        }
+    ],
+)
+
+handler.publish_object(audio)
+```
 
 #### `Interaction`
 
@@ -1120,6 +1177,8 @@ tags = build_hashtag_tags(rc.hashtags, lambda name: f"https://example.com/tags/{
 | `render_post_html(text, hashtag_url)` | Render a post with URL + hashtag linkification. |
 | `render_bio_html(bio)` | Render a bio with URL linkification only. |
 | `build_hashtag_tags(names, hashtag_url)` | Build `Hashtag` tag dicts from normalized names. |
+| `set_object_content(obj, text, hashtag_url)` | Set `obj['content']` from plain text and merge detected hashtags into `obj['tag']`. |
+| `format_duration(seconds)` | Format seconds as an ISO-8601 duration (`PT[h]H[m]M[s]S`) for media objects. |
 | `render_verified_link(url, label=None)` | Render a `rel="me"` link or escaped text. |
 | `property_value_attachment(name, url, label=None)` | Build a `PropertyValue` dict for `ActorConfig.attachment`. |
 | `is_linkable_url(url)` | `True` for safe `http`/`https` URLs with a hostname. |
