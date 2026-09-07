@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- New module `pubby.client` with `extract_actor_inbox` and
+  `resolve_actor_inbox` for one-off remote actor inbox resolution.
+- `pubby.resolve_actor_inbox` and `pubby.extract_actor_inbox` are now
+  re-exported from the top-level package.
+- `pubby.build_like_activity`, `pubby.build_announce_activity`, and
+  `pubby.build_undo_activity` module-level builders, accepting explicit
+  `actor_id`, `to`/`cc`, `activity_id`, `published`, and `@context`.
+- `OutboxProcessor.build_like_activity`, `build_announce_activity`, and
+  `build_undo_activity` are now thin wrappers around the new module-level
+  builders.
+
 ## 0.3.0
 
 ### Added

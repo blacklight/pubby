@@ -18,6 +18,7 @@ from ._model import (
     ObjectType,
 )
 from ._rate_limit import RateLimiter
+from .client import extract_actor_inbox, resolve_actor_inbox
 from .content import (
     RenderedContent,
     build_hashtag_tags,
@@ -32,7 +33,13 @@ from .content import (
     set_object_content,
 )
 from .handlers import ActivityPubHandler
-from .handlers._outbox import collect_inboxes, deliver_activity
+from .handlers._outbox import (
+    build_announce_activity,
+    build_like_activity,
+    build_undo_activity,
+    collect_inboxes,
+    deliver_activity,
+)
 from .moderation import extract_domain, is_domain_blocked, normalize_domain
 from .storage import ActivityPubStorage
 from .webfinger import Mention, extract_mentions, resolve_actor_url
@@ -47,12 +54,16 @@ __all__ = [
     "ActivityType",
     "Actor",
     "ActorConfig",
+    "build_announce_activity",
     "build_hashtag_tags",
+    "build_like_activity",
+    "build_undo_activity",
     "collect_inboxes",
     "deliver_activity",
     "DeliveryError",
     "DeliveryStatus",
     "display_url",
+    "extract_actor_inbox",
     "extract_domain",
     "extract_mentions",
     "Follower",
@@ -74,6 +85,7 @@ __all__ = [
     "render_post_html",
     "render_verified_link",
     "RenderedContent",
+    "resolve_actor_inbox",
     "resolve_actor_url",
     "set_object_content",
     "SignatureVerificationError",

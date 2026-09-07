@@ -54,6 +54,7 @@ Tornado) wire to HTTP routes.
 ```
 src/python/pubby/
 ├── __init__.py              # Public re-exports, __version__
+├── client.py                # One-off actor/inbox resolution
 ├── _model.py                # Core data model (dataclasses + enums)
 ├── _exceptions.py           # Exception hierarchy
 ├── _rate_limit.py           # In-memory sliding-window rate limiter
@@ -253,7 +254,10 @@ Responsible for:
 1. **Building activities** — `build_create_activity()`,
    `build_update_activity()`, `build_delete_activity()`,
    `build_like_activity()`, `build_announce_activity()`,
-   `build_undo_activity()`.
+   `build_undo_activity()`.  These are thin wrappers around the
+   module-level `build_like_activity()`, `build_announce_activity()`,
+   and `build_undo_activity()` helpers, which accept explicit
+   `actor_id`, `to`/`cc`, `activity_id`, `published`, and `@context`.
 2. **Publishing** — `publish(activity)` stores the activity, collects
    follower inboxes (preferring shared inboxes for deduplication, via the
    module-level `collect_inboxes()` helper), then fans out delivery
@@ -285,6 +289,19 @@ response dicts.
 
 `get_default_user_agent(actor_id)` returns the default `User-Agent` string
 (`pubby/{version} (+{actor_id})`).
+
+#### 6.6 `pubby.client`
+
+One-off actor/inbox resolution for applications that build their own
+delivery pipeline:
+
+- **`extract_actor_inbox(actor_data)`** — returns `endpoints.sharedInbox`
+  when present, otherwise `inbox`, or `None` if neither is available.
+- **`resolve_actor_inbox(actor_url, storage, *, private_key=None,
+  key_id=None, allowed_instances=None, blocked_instances=None,
+  user_agent=None, timeout=10.0)`** — resolves a remote actor's inbox
+  using the actor cache and an optional signed HTTP GET, with
+  allow/block domain filtering.
 
 ### 7. WebFinger Client — `pubby.webfinger`
 
@@ -500,6 +517,7 @@ pubby.__init__
   │                             object content/duration helpers)
   ├── pubby.webfinger          (Mention, resolve_actor_url, extract_mentions)
   ├── pubby.crypto             (_keys, _signatures)
+  ├── pubby.client             (extract_actor_inbox, resolve_actor_inbox)
   ├── pubby.handlers           (ActivityPubHandler)
   │     ├── _handler.py
   │     │     ├── _inbox.py    → crypto, storage, _model, _exceptions, moderation

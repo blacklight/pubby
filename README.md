@@ -56,9 +56,13 @@
   - [WebFinger Client](#webfinger-client)
     - [`resolve_actor_url(username, domain, *, timeout=10) -> str`](#resolve_actor_urlusername-domain--timeout10---str)
     - [`extract_mentions(text, *, timeout=10) -> list\[Mention\]`](#extract_mentionstext--timeout10---listmention)
+  - [Actor / Inbox Resolution](#actor--inbox-resolution)
+    - [`resolve_actor_inbox(actor_url, storage, *, private_key=None, key_id=None, allowed_instances=None, blocked_instances=None, user_agent=None, timeout=10.0) -> str | None`](#resolve_actor_inboxactor_url-storage--private_keynone-key_idnone-allowed_instancesnone-blocked_instancesnone-user_agentnone-timeout100---str--none)
+    - [`extract_actor_inbox(actor_data) -> str | None`](#extract_actor_inboxactor_data---str--none)
   - [Publishing](#publishing)
     - [`handler.publish_object(obj, activity_type="Create")`](#handlerpublish_objectobj-activity_typecreate)
     - [`handler.publish_activity(activity)`](#handlerpublish_activityactivity)
+    - [Module-level builders](#module-level-builders)
     - [`handler.publish_actor_update(document=None)`](#handlerpublish_actor_updatedocumentnone)
   - [Content Rendering](#content-rendering)
   - [Storage](#storage)
@@ -1137,6 +1141,45 @@ tags = [m.to_tag() for m in mentions]
 cc = [m.actor_url for m in mentions]
 ```
 
+### Actor / Inbox Resolution
+
+#### `resolve_actor_inbox(actor_url, storage, *, private_key=None, key_id=None, allowed_instances=None, blocked_instances=None, user_agent=None, timeout=10.0) -> str | None`
+
+Resolve a remote actor's inbox by fetching their actor document, with optional
+HTTP Signature support, domain filtering, and actor-cache integration.
+
+```python
+from pubby import resolve_actor_inbox
+from pubby.storage.adapters.db import init_db_storage
+
+storage = init_db_storage("sqlite:////tmp/pubby.db")
+inbox = resolve_actor_inbox(
+    "https://remote.example.com/users/bob",
+    storage,
+    private_key=private_key,
+    key_id="https://example.com/ap/actor#main-key",
+    allowed_instances={"remote.example"},
+    user_agent="MyApp/1.0.0",
+)
+# "https://remote.example.com/inbox" or None on failure
+```
+
+- Consults the actor cache first (`storage.get_cached_actor`).
+- Signs the GET when both `private_key` and `key_id` are provided; accepts an
+  `RSAPrivateKey` object or a PEM string/bytes.
+- Filters blocked/non-allowed instances before making a network call.
+- Returns `endpoints.sharedInbox` when available, otherwise `inbox`.
+
+#### `extract_actor_inbox(actor_data) -> str | None`
+
+Extract the preferred inbox from a raw actor document:
+
+```python
+from pubby.client import extract_actor_inbox
+
+inbox = extract_actor_inbox(actor_data)
+```
+
 ### Publishing
 
 #### `handler.publish_object(obj, activity_type="Create")`
@@ -1182,6 +1225,31 @@ Available builders on `handler.outbox`:
 
 `build_undo_activity` is intentionally generic — it works for
 `Undo Like`, `Undo Announce`, `Undo Follow`, etc.
+
+#### Module-level builders
+
+You can also build payloads without a handler. This is useful when your
+application controls addressing, timestamps, or activity IDs itself:
+
+```python
+from pubby import build_like_activity, build_announce_activity, build_undo_activity
+from datetime import datetime, timezone
+
+like = build_like_activity(
+    actor_id="https://example.com/ap/actor",
+    object_id="https://remote.example.com/post/42",
+    to=["https://www.w3.org/ns/activitystreams#Public"],
+    cc=["https://remote.example.com/users/bob"],
+    activity_id="https://example.com/activities/like-1",
+    published=datetime.now(timezone.utc),
+)
+
+undo = build_undo_activity(like, actor_id="https://example.com/ap/actor")
+```
+
+These free functions are the same helpers `handler.outbox` uses internally,
+but with explicit `actor_id`, `to`/`cc`, and `@context` parameters so you can
+shape the payload to match your application's addressing rules.
 
 #### `handler.publish_actor_update(document=None)`
 

@@ -12,6 +12,9 @@ from pubby._model import Follower, Object
 from pubby.handlers._outbox import (
     AS_PUBLIC,
     OutboxProcessor,
+    build_announce_activity,
+    build_like_activity,
+    build_undo_activity,
     collect_inboxes,
     deliver_activity,
 )
@@ -206,6 +209,129 @@ class TestBuildActivities:
         assert undo["object"]["type"] == "Announce"
         assert undo["to"] == boost["to"]
         assert undo["cc"] == boost["cc"]
+
+
+class TestFreeBuildActivities:
+    """Tests for the module-level activity builders."""
+
+    def test_build_like_activity_defaults(self):
+        activity = build_like_activity(
+            actor_id="https://blog.example.com/ap/actor",
+            object_id="https://remote.example.com/post/42",
+        )
+        assert activity["type"] == "Like"
+        assert activity["actor"] == "https://blog.example.com/ap/actor"
+        assert activity["object"] == "https://remote.example.com/post/42"
+        assert AS_PUBLIC in activity["to"]
+        assert activity["cc"] == []
+        assert "published" in activity
+        assert "id" in activity
+        assert activity["id"].startswith(
+            "https://blog.example.com/ap/actor/activities/"
+        )
+
+    def test_build_like_activity_explicit_audience(self):
+        activity = build_like_activity(
+            actor_id="https://blog.example.com/ap/actor",
+            object_id="https://remote.example.com/post/42",
+            to=["https://remote.example.com/users/bob"],
+            cc=["https://blog.example.com/ap/followers"],
+        )
+        assert activity["to"] == ["https://remote.example.com/users/bob"]
+        assert activity["cc"] == ["https://blog.example.com/ap/followers"]
+
+    def test_build_like_activity_explicit_id_and_published(self):
+        ts = datetime(2025, 3, 14, 12, 0, 0, tzinfo=timezone.utc)
+        activity = build_like_activity(
+            actor_id="https://blog.example.com/ap/actor",
+            object_id="https://remote.example.com/post/42",
+            activity_id="https://blog.example.com/activities/like-1",
+            published=ts,
+        )
+        assert activity["id"] == "https://blog.example.com/activities/like-1"
+        assert activity["published"] == ts.isoformat()
+
+    def test_build_like_activity_published_string(self):
+        activity = build_like_activity(
+            actor_id="https://blog.example.com/ap/actor",
+            object_id="https://remote.example.com/post/42",
+            published="2025-03-14T12:00:00+00:00",
+        )
+        assert activity["published"] == "2025-03-14T12:00:00+00:00"
+
+    def test_build_like_activity_context_override(self):
+        activity = build_like_activity(
+            actor_id="https://blog.example.com/ap/actor",
+            object_id="https://remote.example.com/post/42",
+            context=["https://www.w3.org/ns/activitystreams"],
+        )
+        assert activity["@context"] == ["https://www.w3.org/ns/activitystreams"]
+
+    def test_build_announce_activity_defaults(self):
+        activity = build_announce_activity(
+            actor_id="https://blog.example.com/ap/actor",
+            object_id="https://remote.example.com/post/42",
+        )
+        assert activity["type"] == "Announce"
+        assert activity["actor"] == "https://blog.example.com/ap/actor"
+        assert activity["object"] == "https://remote.example.com/post/42"
+        assert AS_PUBLIC in activity["to"]
+        assert activity["cc"] == []
+
+    def test_build_announce_activity_with_followers_cc(self):
+        activity = build_announce_activity(
+            actor_id="https://blog.example.com/ap/actor",
+            object_id="https://remote.example.com/post/42",
+            cc=["https://blog.example.com/ap/followers"],
+        )
+        assert activity["cc"] == ["https://blog.example.com/ap/followers"]
+
+    def test_build_undo_activity_inherits_addressing(self):
+        inner = build_like_activity(
+            actor_id="https://blog.example.com/ap/actor",
+            object_id="https://remote.example.com/post/1",
+            to=["https://specific.example.com/users/alice"],
+            cc=["https://blog.example.com/ap/followers"],
+        )
+        undo = build_undo_activity(
+            inner,
+            actor_id="https://blog.example.com/ap/actor",
+        )
+        assert undo["type"] == "Undo"
+        assert undo["actor"] == "https://blog.example.com/ap/actor"
+        assert undo["object"] is inner
+        assert undo["to"] == ["https://specific.example.com/users/alice"]
+        assert undo["cc"] == ["https://blog.example.com/ap/followers"]
+
+    def test_build_undo_activity_defaults_addressing(self):
+        inner = {
+            "id": "https://blog.example.com/activities/123",
+            "type": "Like",
+            "actor": "https://blog.example.com/ap/actor",
+            "object": "https://remote.example.com/post/1",
+        }
+        undo = build_undo_activity(
+            inner,
+            actor_id="https://blog.example.com/ap/actor",
+        )
+        assert AS_PUBLIC in undo["to"]
+        assert undo["cc"] == []
+
+    def test_build_undo_activity_overrides_addressing(self):
+        inner = build_like_activity(
+            actor_id="https://blog.example.com/ap/actor",
+            object_id="https://remote.example.com/post/1",
+            to=["https://remote.example.com/users/alice"],
+            cc=["https://blog.example.com/ap/followers"],
+        )
+        undo = build_undo_activity(
+            inner,
+            actor_id="https://blog.example.com/ap/actor",
+            to=[AS_PUBLIC],
+            cc=[],
+        )
+        assert undo["to"] == [AS_PUBLIC]
+        assert undo["cc"] == []
 
 
 class TestCollectInboxes:

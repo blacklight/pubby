@@ -9,7 +9,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
-from typing import Callable, Collection
+from typing import Any, Callable, Collection
 
 import requests
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -143,6 +143,165 @@ def deliver_activity(
         )
 
     return resp.status_code
+
+
+def _new_activity_id(actor_id: str) -> str:
+    """Generate a unique activity ID under an actor."""
+    return f"{actor_id}/activities/{uuid.uuid4()}"
+
+
+def _format_published(published: datetime | str | None) -> str:
+    """Normalize a published timestamp to an ISO-8601 string."""
+    if published is None:
+        return datetime.now(timezone.utc).isoformat()
+    if isinstance(published, datetime):
+        return published.isoformat()
+    return published
+
+
+def build_like_activity(
+    actor_id: str,
+    object_id: str,
+    *,
+    to: list[str] | None = None,
+    cc: list[str] | None = None,
+    activity_id: str | None = None,
+    published: datetime | str | None = None,
+    context: Any = AP_CONTEXT,
+) -> dict:
+    """
+    Build a Like activity targeting a remote object.
+
+    Audience is caller-provided; when ``to``/``cc`` are omitted, the
+    activity defaults to ``to=[AS_PUBLIC]`` and ``cc=[]``.
+
+    :param actor_id: The actor ID (URL) performing the Like.
+    :param object_id: The URL of the object being liked.
+    :param to: Optional explicit ``to`` recipients. Defaults to public.
+    :param cc: Optional explicit ``cc`` recipients. Defaults to empty.
+    :param activity_id: Optional explicit activity ID. If not provided, a
+        new unique ID is generated under ``actor_id``.
+    :param published: Optional publication timestamp. A ``datetime`` is
+        converted with ``.isoformat()``; a ``str`` is used as-is;
+        ``None`` defaults to the current UTC time.
+    :param context: Optional JSON-LD ``@context`` value. Defaults to
+        ``AP_CONTEXT``.
+    :return: The activity as a JSON-LD dictionary.
+    """
+    if to is None:
+        to = [AS_PUBLIC]
+    if cc is None:
+        cc = []
+
+    return {
+        "@context": context,
+        "id": activity_id or _new_activity_id(actor_id),
+        "type": "Like",
+        "actor": actor_id,
+        "published": _format_published(published),
+        "object": object_id,
+        "to": to,
+        "cc": cc,
+    }
+
+
+def build_announce_activity(
+    actor_id: str,
+    object_id: str,
+    *,
+    to: list[str] | None = None,
+    cc: list[str] | None = None,
+    activity_id: str | None = None,
+    published: datetime | str | None = None,
+    context: Any = AP_CONTEXT,
+) -> dict:
+    """
+    Build an Announce (boost) activity targeting a remote object.
+
+    Audience is caller-provided; when ``to``/``cc`` are omitted, the
+    activity defaults to ``to=[AS_PUBLIC]`` and ``cc=[]``.
+
+    :param actor_id: The actor ID (URL) performing the Announce.
+    :param object_id: The URL of the object being boosted.
+    :param to: Optional explicit ``to`` recipients. Defaults to public.
+    :param cc: Optional explicit ``cc`` recipients. Defaults to empty.
+    :param activity_id: Optional explicit activity ID. If not provided, a
+        new unique ID is generated under ``actor_id``.
+    :param published: Optional publication timestamp. A ``datetime`` is
+        converted with ``.isoformat()``; a ``str`` is used as-is;
+        ``None`` defaults to the current UTC time.
+    :param context: Optional JSON-LD ``@context`` value. Defaults to
+        ``AP_CONTEXT``.
+    :return: The activity as a JSON-LD dictionary.
+    """
+    if to is None:
+        to = [AS_PUBLIC]
+    if cc is None:
+        cc = []
+
+    return {
+        "@context": context,
+        "id": activity_id or _new_activity_id(actor_id),
+        "type": "Announce",
+        "actor": actor_id,
+        "published": _format_published(published),
+        "object": object_id,
+        "to": to,
+        "cc": cc,
+    }
+
+
+def build_undo_activity(
+    inner_activity: dict,
+    actor_id: str,
+    *,
+    activity_id: str | None = None,
+    published: datetime | str | None = None,
+    to: list[str] | None = None,
+    cc: list[str] | None = None,
+    context: Any = AP_CONTEXT,
+) -> dict:
+    """
+    Build an Undo activity wrapping another activity.
+
+    This is intentionally generic: it works for ``Undo Like``,
+    ``Undo Announce``, ``Undo Follow``, etc.
+
+    When ``to``/``cc`` are omitted, the addressing is inherited from
+    ``inner_activity``; if the inner activity has no addressing, it
+    defaults to ``to=[AS_PUBLIC]`` and ``cc=[]``.
+
+    :param inner_activity: The activity to undo (must contain at least
+        ``id``, ``type``, ``actor``, and ``object``).
+    :param actor_id: The actor ID (URL) performing the Undo.
+    :param activity_id: Optional explicit activity ID. If not provided, a
+        new unique ID is generated under ``actor_id``.
+    :param published: Optional publication timestamp. A ``datetime`` is
+        converted with ``.isoformat()``; a ``str`` is used as-is;
+        ``None`` defaults to the current UTC time.
+    :param to: Optional explicit ``to`` recipients. Defaults to the inner
+        activity's ``to`` field (or public).
+    :param cc: Optional explicit ``cc`` recipients. Defaults to the inner
+        activity's ``cc`` field (or empty).
+    :param context: Optional JSON-LD ``@context`` value. Defaults to
+        ``AP_CONTEXT``.
+    :return: The Undo activity as a JSON-LD dictionary.
+    """
+    if to is None:
+        to = inner_activity.get("to", [AS_PUBLIC])
+    if cc is None:
+        cc = inner_activity.get("cc", [])
+
+    return {
+        "@context": context,
+        "id": activity_id or _new_activity_id(actor_id),
+        "type": "Undo",
+        "actor": actor_id,
+        "published": _format_published(published),
+        "object": inner_activity,
+        "to": to,
+        "cc": cc,
+    }
 
 
 class OutboxProcessor:
@@ -318,7 +477,7 @@ class OutboxProcessor:
         object_url: str,
         *,
         activity_id: str | None = None,
-        published: datetime | None = None,
+        published: datetime | str | None = None,
     ) -> dict:
         """
         Build a Like activity targeting a remote object.
@@ -329,30 +488,20 @@ class OutboxProcessor:
         :param published: Optional publication timestamp. Defaults to now.
         :return: The activity as a JSON-LD dictionary.
         """
-        activity_id = activity_id or self._new_activity_id()
-        now = (published or datetime.now(timezone.utc)).isoformat()
-
-        activity = {
-            "@context": AP_CONTEXT,
-            "id": activity_id,
-            "type": "Like",
-            "actor": self.actor_id,
-            "published": now,
-            "object": object_url,
-            "to": [AS_PUBLIC],
-            "cc": (
-                [self.followers_collection_url] if self.followers_collection_url else []
-            ),
-        }
-
-        return activity
+        return build_like_activity(
+            actor_id=self.actor_id,
+            object_id=object_url,
+            cc=[self.followers_collection_url] if self.followers_collection_url else [],
+            activity_id=activity_id,
+            published=published,
+        )
 
     def build_announce_activity(
         self,
         object_url: str,
         *,
         activity_id: str | None = None,
-        published: datetime | None = None,
+        published: datetime | str | None = None,
     ) -> dict:
         """
         Build an Announce (boost) activity targeting a remote object.
@@ -363,22 +512,13 @@ class OutboxProcessor:
         :param published: Optional publication timestamp. Defaults to now.
         :return: The activity as a JSON-LD dictionary.
         """
-        activity_id = activity_id or self._new_activity_id()
-        now = (published or datetime.now(timezone.utc)).isoformat()
-        activity = {
-            "@context": AP_CONTEXT,
-            "id": activity_id,
-            "type": "Announce",
-            "actor": self.actor_id,
-            "published": now,
-            "object": object_url,
-            "to": [AS_PUBLIC],
-            "cc": (
-                [self.followers_collection_url] if self.followers_collection_url else []
-            ),
-        }
-
-        return activity
+        return build_announce_activity(
+            actor_id=self.actor_id,
+            object_id=object_url,
+            cc=[self.followers_collection_url] if self.followers_collection_url else [],
+            activity_id=activity_id,
+            published=published,
+        )
 
     def build_undo_activity(self, inner_activity: dict) -> dict:
         """
@@ -391,20 +531,10 @@ class OutboxProcessor:
             ``id``, ``type``, ``actor``, and ``object``).
         :return: The Undo activity as a JSON-LD dictionary.
         """
-        activity_id = self._new_activity_id()
-        now = datetime.now(timezone.utc).isoformat()
-        activity = {
-            "@context": AP_CONTEXT,
-            "id": activity_id,
-            "type": "Undo",
-            "actor": self.actor_id,
-            "published": now,
-            "object": inner_activity,
-            "to": inner_activity.get("to", [AS_PUBLIC]),
-            "cc": inner_activity.get("cc", []),
-        }
-
-        return activity
+        return build_undo_activity(
+            inner_activity=inner_activity,
+            actor_id=self.actor_id,
+        )
 
     def publish(self, activity: dict) -> dict:
         """
