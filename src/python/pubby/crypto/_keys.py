@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 
@@ -89,3 +91,37 @@ def export_private_key_pem(
         encryption_algorithm=encryption,
     )
     return pem_bytes.decode("utf-8")
+
+
+def ensure_private_key_file(path: str | Path) -> Path:
+    """
+    Return the resolved path to a PEM private key file, generating an
+    RSA-2048 keypair if the file is missing or empty.
+
+    Parent directories are created as needed and the key is written with
+    ``0o600`` permissions.  The choice of path (e.g. an XDG data directory)
+    is left to the application.
+
+    The returned :class:`Path` composes directly with the
+    ``private_key_path`` parameter of ``ActivityPubHandler``:
+
+    .. code-block:: python
+
+        handler = ActivityPubHandler(
+            storage=storage,
+            actor_config=config,
+            private_key_path=ensure_private_key_file("~/.myapp/actor.pem"),
+        )
+
+    :param path: Path to the private key file.
+    :return: The resolved path to the (existing or newly generated) key file.
+    """
+    key_path = Path(path).expanduser().resolve()
+    key_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if not key_path.exists() or key_path.stat().st_size == 0:
+        private_key, _ = generate_rsa_keypair()
+        key_path.write_text(export_private_key_pem(private_key), encoding="utf-8")
+        key_path.chmod(0o600)
+
+    return key_path

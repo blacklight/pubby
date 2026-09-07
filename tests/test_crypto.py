@@ -2,8 +2,12 @@
 Tests for RSA key generation, loading, and export.
 """
 
+import stat
+from unittest.mock import MagicMock
+
 from cryptography.hazmat.primitives.asymmetric import rsa
 
+from pubby.crypto import ensure_private_key_file
 from pubby.crypto._keys import (
     export_private_key_pem,
     export_public_key_pem,
@@ -11,6 +15,7 @@ from pubby.crypto._keys import (
     load_private_key,
     load_public_key,
 )
+from pubby.handlers import ActivityPubHandler
 
 
 class TestKeyGeneration:
@@ -138,3 +143,54 @@ class TestSignVerifyRoundTrip:
                 padding.PKCS1v15(),
                 hashes.SHA256(),
             )
+
+
+class TestEnsurePrivateKeyFile:
+    def test_creates_missing_file(self, tmp_path):
+        key_path = tmp_path / "actor.pem"
+        result = ensure_private_key_file(key_path)
+
+        assert result == key_path.resolve()
+        assert result.exists()
+
+        key = load_private_key(result.read_text(encoding="utf-8"))
+        assert isinstance(key, rsa.RSAPrivateKey)
+        assert key.key_size == 2048
+
+    def test_idempotent_on_existing_file(self, tmp_path):
+        key_path = ensure_private_key_file(tmp_path / "actor.pem")
+        original = key_path.read_text(encoding="utf-8")
+
+        again = ensure_private_key_file(key_path)
+        assert again == key_path
+        assert again.read_text(encoding="utf-8") == original
+
+    def test_regenerates_empty_file(self, tmp_path):
+        key_path = tmp_path / "actor.pem"
+        key_path.touch()
+
+        result = ensure_private_key_file(key_path)
+        key = load_private_key(result.read_text(encoding="utf-8"))
+        assert isinstance(key, rsa.RSAPrivateKey)
+
+    def test_file_written_with_0600_permissions(self, tmp_path):
+        key_path = ensure_private_key_file(tmp_path / "actor.pem")
+        assert stat.S_IMODE(key_path.stat().st_mode) == 0o600
+
+    def test_creates_parent_directories(self, tmp_path):
+        key_path = ensure_private_key_file(tmp_path / "nested" / "dir" / "actor.pem")
+        assert key_path.exists()
+
+    def test_accepts_str_path(self, tmp_path):
+        key_path = ensure_private_key_file(str(tmp_path / "actor.pem"))
+        assert key_path.exists()
+
+    def test_result_feeds_private_key_path(self, tmp_path, actor_config):
+        key_path = ensure_private_key_file(tmp_path / "actor.pem")
+
+        handler = ActivityPubHandler(
+            storage=MagicMock(),
+            actor_config=actor_config,
+            private_key_path=key_path,
+        )
+        assert handler.public_key_pem.startswith("-----BEGIN PUBLIC KEY-----")

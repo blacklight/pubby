@@ -87,7 +87,7 @@ src/python/pubby/
 │       ├── db/
 │       │   ├── _model.py    # SQLAlchemy mixin models (DbFollower, …)
 │       │   ├── _storage.py  # DbActivityPubStorage (SQLAlchemy impl)
-│       │   └── _helpers.py  # init_db_storage() quick-start helper
+│       │   └── _helpers.py  # init_db_storage() + to_sync_url() helpers
 │       └── file/
 │           └── _storage.py  # FileActivityPubStorage (JSON files)
 │
@@ -175,7 +175,7 @@ Two internal modules, re-exported through `pubby.crypto.__init__`:
 
 | Module | Exposed API |
 |--------|-------------|
-| `_keys.py` | `generate_rsa_keypair()`, `load_private_key()`, `load_public_key()`, `export_private_key_pem()`, `export_public_key_pem()` |
+| `_keys.py` | `generate_rsa_keypair()`, `load_private_key()`, `load_public_key()`, `export_private_key_pem()`, `export_public_key_pem()`, `ensure_private_key_file()` |
 | `_signatures.py` | `sign_request()`, `verify_request()` |
 
 **Key management** uses the `cryptography` library directly (RSA 2048-bit,
@@ -319,7 +319,14 @@ break when Pubby adds new features.
   creates a self-contained declarative Base, mapped models with default
   table names (`ap_followers`, `ap_interactions`, `ap_activities`,
   `ap_actor_cache`), calls `create_all()`, and returns a ready-to-use
-  `DbActivityPubStorage`.
+  `DbActivityPubStorage`.  String URLs using a known async driver are
+  converted via `to_sync_url()` before `create_engine()`; `driver_map`
+  extends or overrides `DEFAULT_ASYNC_DRIVER_MAP`.
+- **`to_sync_url(url, driver_map=None)`** (`_helpers.py`): converts an
+  async SQLAlchemy URL to its sync-driver equivalent
+  (`DEFAULT_ASYNC_DRIVER_MAP`: `sqlite+aiosqlite` → `sqlite`,
+  `postgresql+asyncpg` → `postgresql+psycopg2`).  Already-sync URLs pass
+  through unchanged; unknown async drivers raise `ValueError`.
 
 #### 8.3 File Adapter — `pubby.storage.adapters.file`
 

@@ -12,6 +12,15 @@ All notable changes to this project will be documented in this file.
   Incoming activities from blocked (or non-allowed) actor domains are dropped
   before signature verification, and outbound delivery skips inboxes on
   blocked/non-allowed domains.
+- **Async→sync database URL bridging**: `to_sync_url` and
+  `DEFAULT_ASYNC_DRIVER_MAP` in `pubby.storage.adapters.db` convert async
+  SQLAlchemy URLs (`sqlite+aiosqlite`, `postgresql+asyncpg`) to their sync
+  equivalents. `init_db_storage` accepts async string URLs directly and a
+  `driver_map` parameter to extend or override the default mapping.
+- `pubby.crypto.ensure_private_key_file` generates and persists an RSA-2048
+  PEM private key (mode `0o600`, parents created) when the file is missing or
+  empty, returning the resolved path for `ActivityPubHandler`'s
+  `private_key_path` parameter.
 
 ## 0.2.23
 

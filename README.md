@@ -30,6 +30,7 @@
 - [Rendering Plain-Text Content](#rendering-plain-text-content)
 - [Key Management](#key-management)
 - [Custom Storage](#custom-storage)
+  - [Async Database URLs](#async-database-urls)
   - [File-based Storage](#file-based-storage)
   - [Multi-actor Support](#multi-actor-support)
     - [Upgrading from single-actor deployments](#upgrading-from-single-actor-deployments)
@@ -388,6 +389,22 @@ list of helpers.
 **Important:** your RSA keypair is your server's identity. Persist it — if you
 regenerate it, other servers won't be able to verify your signatures.
 
+The simplest option is `ensure_private_key_file`, which generates an RSA-2048
+keypair and writes it with `0o600` permissions the first time, then reuses the
+existing file on subsequent runs:
+
+```python
+from pubby.crypto import ensure_private_key_file
+
+handler = ActivityPubHandler(
+    storage=storage,
+    actor_config={...},
+    private_key_path=ensure_private_key_file("/var/lib/myapp/actor.pem"),
+)
+```
+
+Or manage the keypair yourself:
+
 ```python
 from pubby.crypto import (
     generate_rsa_keypair,
@@ -460,6 +477,36 @@ handler = ActivityPubHandler(
     actor_config={...},
     private_key=private_key,
 )
+```
+
+### Async Database URLs
+
+`DbActivityPubStorage` is synchronous. If your application runs on an async
+database stack, pass its URL to `init_db_storage` directly — known async
+drivers are converted automatically (`sqlite+aiosqlite` → `sqlite`,
+`postgresql+asyncpg` → `postgresql+psycopg2`):
+
+```python
+storage = init_db_storage("sqlite+aiosqlite:////tmp/pubby.db")
+```
+
+Unknown async drivers raise `ValueError`. Extend or override the default
+mapping with `driver_map` (e.g. for psycopg3):
+
+```python
+storage = init_db_storage(
+    "postgresql+asyncpg://user:pass@db.example.com/mydb",
+    driver_map={"postgresql+asyncpg": "postgresql+psycopg"},
+)
+```
+
+`to_sync_url(url, driver_map=None)` is also exported if you only need the
+converted URL:
+
+```python
+from pubby.storage.adapters.db import to_sync_url
+
+to_sync_url("sqlite+aiosqlite:////tmp/pubby.db")  # "sqlite:////tmp/pubby.db"
 ```
 
 ### File-based Storage
