@@ -9,9 +9,10 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
-from typing import Collection
+from typing import Callable, Collection
 
 import requests
+from cryptography.hazmat.primitives.asymmetric import rsa
 
 from .._model import (
     AP_CONTEXT,
@@ -38,6 +39,112 @@ _NON_ACTOR_URL_PATTERNS = (
 )
 
 
+def collect_inboxes(followers: list[Follower]) -> list[str]:
+    """
+    Collect unique inbox URLs from followers, preferring shared inboxes.
+
+    Shared inboxes are preferred over per-actor inboxes to reduce the number
+    of delivery requests; followers without any inbox are skipped.  This is
+    the same collection logic :class:`OutboxProcessor` uses for its fan-out,
+    exposed for applications that build their own delivery pipeline.
+
+    :param followers: List of followers.
+    :return: Deduplicated list of inbox URLs.
+    """
+    seen: set[str] = set()
+    inboxes: list[str] = []
+
+    for follower in followers:
+        # Prefer shared inbox to reduce delivery requests
+        inbox = follower.shared_inbox or follower.inbox
+        if inbox and inbox not in seen:
+            seen.add(inbox)
+            inboxes.append(inbox)
+
+    return inboxes
+
+
+def deliver_activity(
+    activity: dict,
+    inbox_url: str,
+    *,
+    key_id: str,
+    private_key: rsa.RSAPrivateKey,
+    user_agent: str | None = None,
+    timeout: float = 15.0,
+) -> int:
+    """
+    Deliver an activity to a single inbox with one signed POST request.
+
+    Unlike the built-in fan-out, this performs no retries and does not
+    raise on HTTP error statuses: it returns the response status code so
+    callers (e.g. a task-queue worker) can decide their own retry policy.
+    Network-level failures (connection errors, timeouts) still raise the
+    underlying ``requests`` exception.
+
+    :param activity: The activity JSON-LD dictionary.
+    :param inbox_url: The remote inbox URL.
+    :param key_id: Key ID for the HTTP signature (``<actor_id>#main-key``).
+    :param private_key: RSA private key used to sign the request.
+    :param user_agent: Optional ``User-Agent`` header; defaults to
+        ``pubby/{version}``.
+    :param timeout: HTTP request timeout in seconds.
+    :return: The HTTP response status code.
+    """
+    body = json.dumps(activity).encode("utf-8")
+    content_type = "application/activity+json"
+    content_length = str(len(body))
+
+    signed_headers = sign_request(
+        private_key=private_key,
+        key_id=key_id,
+        method="POST",
+        url=inbox_url,
+        body=body,
+        headers={
+            "Content-Type": content_type,
+            "Content-Length": content_length,
+        },
+        signed_headers=[
+            "(request-target)",
+            "host",
+            "date",
+            "digest",
+            "content-type",
+            "content-length",
+        ],
+    )
+
+    if user_agent is None:
+        from pubby import __version__
+
+        user_agent = f"pubby/{__version__}"
+
+    resp = requests.post(
+        inbox_url,
+        data=body,
+        headers={
+            **signed_headers,
+            "Content-Type": content_type,
+            "Content-Length": content_length,
+            "User-Agent": user_agent,
+        },
+        timeout=timeout,
+    )
+
+    if 200 <= resp.status_code < 300:
+        logger.info("Delivered to %s (status %d)", inbox_url, resp.status_code)
+    else:
+        logger.warning(
+            "Delivery to %s returned status %d: %s",
+            inbox_url,
+            resp.status_code,
+            resp.text[:200],
+        )
+
+    return resp.status_code
+
+
 class OutboxProcessor:
     """
     Handles outbound activity creation and delivery.
@@ -60,6 +167,13 @@ class OutboxProcessor:
         When non-empty, deliveries are only sent to inboxes on these domains.
     :param blocked_instances: Optional block-list of remote instance domains.
         Inboxes on these domains are skipped during delivery fan-out.
+    :param deliver: Optional custom delivery callable invoked once per
+        collected inbox as ``deliver(inbox_url, activity)`` instead of the
+        built-in ``ThreadPoolExecutor`` fan-out.  Use it to route deliveries
+        through a task queue (e.g. Celery or RQ) while keeping Pubby's inbox
+        collection, shared-inbox deduplication, and instance allow/block
+        filtering.  The callable is invoked synchronously by ``publish()``;
+        ``async_delivery`` does not apply to it.
     """
 
     def __init__(
@@ -78,6 +192,7 @@ class OutboxProcessor:
         async_delivery: bool = True,
         allowed_instances: Collection[str] | None = None,
         blocked_instances: Collection[str] | None = None,
+        deliver: Callable[[str, dict], None] | None = None,
         **_,
     ):
         self.storage = storage
@@ -93,6 +208,7 @@ class OutboxProcessor:
         self.async_delivery = async_delivery
         self.allowed_instances = allowed_instances
         self.blocked_instances = blocked_instances
+        self.deliver = deliver
 
     def _new_activity_id(self) -> str:
         """Generate a unique activity ID."""
@@ -313,7 +429,7 @@ class OutboxProcessor:
         # Collect follower inboxes only if addressed to followers
         if addressed_to_followers:
             followers = self.storage.get_followers(actor_id=self.actor_id)
-            follower_inboxes = self._collect_inboxes(followers)
+            follower_inboxes = collect_inboxes(followers)
             logger.debug(
                 "Collected %d follower inboxes for activity %s",
                 len(follower_inboxes),
@@ -370,7 +486,20 @@ class OutboxProcessor:
             len(inboxes),
         )
 
-        if self.async_delivery:
+        if self.deliver is not None:
+            # Custom delivery seam: hand each inbox to the caller-supplied
+            # callable (e.g. a task-queue enqueue) instead of fanning out
+            # via ThreadPoolExecutor.
+            for inbox_url in inboxes:
+                try:
+                    self.deliver(inbox_url, activity)
+                except Exception:
+                    logger.error(
+                        "Custom deliver callable failed for inbox %s",
+                        inbox_url,
+                        exc_info=True,
+                    )
+        elif self.async_delivery:
             # Fire-and-forget: spawn a daemon thread for delivery
             threading.Thread(
                 target=self._fan_out_delivery,
@@ -416,20 +545,12 @@ class OutboxProcessor:
         """
         Collect unique inbox URLs from followers, preferring shared inboxes.
 
+        Delegates to the module-level :func:`collect_inboxes`.
+
         :param followers: List of followers.
         :return: Deduplicated list of inbox URLs.
         """
-        seen: set[str] = set()
-        inboxes: list[str] = []
-
-        for follower in followers:
-            # Prefer shared inbox to reduce delivery requests
-            inbox = follower.shared_inbox or follower.inbox
-            if inbox and inbox not in seen:
-                seen.add(inbox)
-                inboxes.append(inbox)
-
-        return inboxes
+        return collect_inboxes(followers)
 
     def _is_addressed_to_followers(self, activity: dict) -> bool:
         """
@@ -643,63 +764,21 @@ class OutboxProcessor:
         """
         Deliver an activity to a single inbox.
 
+        Delegates to the module-level :func:`deliver_activity`.
+
         :param inbox_url: The inbox URL.
         :param activity: The activity to deliver.
         :return: True if the server accepted the delivery (2xx).
         """
-        body = json.dumps(activity).encode("utf-8")
-        content_type = "application/activity+json"
-        content_length = str(len(body))
-
-        signed_headers = sign_request(
-            private_key=self.private_key,  # type: ignore
-            key_id=self.key_id,
-            method="POST",
-            url=inbox_url,
-            body=body,
-            headers={
-                "Content-Type": content_type,
-                "Content-Length": content_length,
-            },
-            signed_headers=[
-                "(request-target)",
-                "host",
-                "date",
-                "digest",
-                "content-type",
-                "content-length",
-            ],
-        )
-
-        resp = requests.post(
+        status = deliver_activity(
+            activity,
             inbox_url,
-            data=body,
-            headers={
-                **signed_headers,
-                "Content-Type": content_type,
-                "Content-Length": content_length,
-                "User-Agent": self.user_agent,
-            },
+            key_id=self.key_id,
+            private_key=self.private_key,  # type: ignore
+            user_agent=self.user_agent,
             timeout=self.http_timeout,
         )
-
-        if 200 <= resp.status_code < 300:
-            logger.info("Delivered to %s (status %d)", inbox_url, resp.status_code)
-            return True
-
-        logger.warning(
-            "Delivery to %s returned status %d: %s",
-            inbox_url,
-            resp.status_code,
-            resp.text[:200],
-        )
-
-        # Retry on 5xx and connection errors
-        if resp.status_code >= 500:
-            return False
-
-        # 4xx errors are not retryable
-        return False
+        return 200 <= status < 300
 
     def get_outbox_collection(
         self,

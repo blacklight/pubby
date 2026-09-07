@@ -27,6 +27,7 @@
     - [`bind_mastodon_api` Parameters](#bind_mastodon_api-parameters)
     - [Status & Account IDs](#status--account-ids)
 - [Publishing Content](#publishing-content)
+  - [Custom Delivery](#custom-delivery)
 - [Rendering Plain-Text Content](#rendering-plain-text-content)
 - [Key Management](#key-management)
 - [Custom Storage](#custom-storage)
@@ -58,7 +59,7 @@
   - [Publishing](#publishing)
     - [`handler.publish_object(obj, activity_type="Create")`](#handlerpublish_objectobj-activity_typecreate)
     - [`handler.publish_activity(activity)`](#handlerpublish_activityactivity)
-    - [`handler.publish_actor_update()`](#handlerpublish_actor_update)
+    - [`handler.publish_actor_update(document=None)`](#handlerpublish_actor_updatedocumentnone)
   - [Content Rendering](#content-rendering)
   - [Storage](#storage)
     - [`ActivityPubStorage`](#activitypubstorage)
@@ -333,6 +334,52 @@ handler.publish_object(deleted_article, activity_type="Delete")
 
 Delivery is concurrent (configurable via `max_delivery_workers`, default 10)
 with automatic retry and exponential backoff on failure.
+
+### Custom Delivery
+
+To route deliveries through your own task queue (Celery, RQ, …) instead of
+the built-in thread pool, pass a `deliver` callable to the handler. Pubby
+still stores the activity and computes the deduplicated inbox set — with
+shared-inbox preference and instance allow/block filtering — then invokes
+your callable once per inbox:
+
+```python
+from pubby import ActivityPubHandler
+
+def deliver(inbox_url, activity):
+    send_activity.delay(inbox_url, activity)   # e.g. a Celery task
+
+handler = ActivityPubHandler(
+    storage=storage,
+    actor_config={...},
+    private_key=private_key,
+    deliver=deliver,
+)
+```
+
+Inside the task, `pubby.deliver_activity` performs a single signed POST and
+returns the HTTP status code so your worker can apply its own retry policy:
+
+```python
+from pubby import deliver_activity
+
+@app.task(bind=True, max_retries=5)
+def send_activity(self, inbox_url, activity):
+    status = deliver_activity(
+        activity,
+        inbox_url,
+        key_id=handler.key_id,
+        private_key=private_key,
+    )
+    if status == 429 or status >= 500:
+        raise self.retry(countdown=60)
+```
+
+`deliver_activity` never raises on 4xx/5xx responses — it returns the status
+code. Network-level failures (connection errors, timeouts) still raise the
+underlying `requests` exception. Applications that build a fully custom
+fan-out can reuse `pubby.collect_inboxes(followers)` to get the same
+shared-inbox-preferred, deduplicated inbox list `publish()` uses.
 
 ## Rendering Plain-Text Content
 
@@ -633,6 +680,7 @@ always pass `target_actor_id` for precise removal.
 | `async_delivery` | `bool` | `True` | Run delivery fan-out in background thread (non-blocking) |
 | `allowed_instances` | `Collection[str]` | `None` | Only federate with these instance domains (allow-list) |
 | `blocked_instances` | `Collection[str]` | `None` | Never federate with these instance domains (block-list) |
+| `deliver` | `Callable[[str, dict], None]` | `None` | Custom delivery callable invoked per inbox (see Custom Delivery) |
 
 ### `actor_config`
 
@@ -1135,7 +1183,7 @@ Available builders on `handler.outbox`:
 `build_undo_activity` is intentionally generic — it works for
 `Undo Like`, `Undo Announce`, `Undo Follow`, etc.
 
-#### `handler.publish_actor_update()`
+#### `handler.publish_actor_update(document=None)`
 
 Push the current actor profile to all followers. Call this after changing
 any actor properties (name, summary, icon, attachment/fields) so remote
@@ -1148,6 +1196,14 @@ handler.publish_actor_update()
 
 The method builds an `Update` activity whose `object` is the full actor
 document, and fans it out to every follower inbox.
+
+When your actor profile lives in your own models rather than in
+`actor_config`, pass a prebuilt actor document as `document` — it becomes
+the activity's `object` verbatim:
+
+```python
+handler.publish_actor_update(document=my_actor_document)
+```
 
 ### Content Rendering
 

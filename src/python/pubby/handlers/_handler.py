@@ -74,6 +74,13 @@ class ActivityPubHandler:
         or receive deliveries.
     :param blocked_instances: Optional block-list of remote instance domains.
         Activities from, and deliveries to, these instances are dropped.
+    :param deliver: Optional custom delivery callable invoked once per
+        collected inbox as ``deliver(inbox_url, activity)`` instead of the
+        built-in threaded fan-out.  Use it to route deliveries through a
+        task queue (e.g. Celery or RQ) while keeping Pubby's inbox
+        collection, shared-inbox deduplication, and instance filtering.
+        Combine with :func:`pubby.deliver_activity` inside your task to
+        perform the signed POST.
     """
 
     def __init__(
@@ -97,6 +104,7 @@ class ActivityPubHandler:
         async_delivery: bool = True,
         allowed_instances: Collection[str] | None = None,
         blocked_instances: Collection[str] | None = None,
+        deliver: Callable[[str, dict], None] | None = None,
     ):
         self.storage = storage
 
@@ -177,6 +185,7 @@ class ActivityPubHandler:
             async_delivery=async_delivery,
             allowed_instances=allowed_instances,
             blocked_instances=blocked_instances,
+            deliver=deliver,
         )
 
         self.renderer = InteractionsRenderer()
@@ -290,16 +299,22 @@ class ActivityPubHandler:
 
         return actor.to_dict()
 
-    def publish_actor_update(self) -> dict:
+    def publish_actor_update(self, document: dict | None = None) -> dict:
         """
         Publish an ``Update`` activity for the actor itself.
 
         This pushes profile changes (name, summary, attachment/fields, icon,
         etc.) to all followers so remote instances refresh their cached copy.
 
+        :param document: Optional prebuilt actor document used as the
+            activity's ``object``.  When ``None`` (the default), the
+            document is built from the handler's ``actor_config`` via
+            :meth:`get_actor_document`.  Pass a custom document when the
+            actor profile lives in your own models rather than in
+            ``actor_config``.
         :return: The published activity dictionary.
         """
-        actor_doc = self.get_actor_document()
+        actor_doc = document if document is not None else self.get_actor_document()
         activity = {
             "@context": AP_CONTEXT,
             "id": f"{self.actor_id}#update-profile-{uuid.uuid4()}",

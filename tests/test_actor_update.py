@@ -185,3 +185,28 @@ class TestPublishActorUpdate:
 
         # Should deliver only once (shared inbox dedup)
         assert mock_requests.post.call_count == 1
+
+    def test_custom_document_used_as_object(self, handler_with_attachment):
+        """publish_actor_update(document=...) uses the supplied actor doc."""
+        custom_doc = {
+            "id": "https://blog.example.com/ap/actor",
+            "type": "Person",
+            "preferredUsername": "custom",
+            "name": "Custom Document",
+            "inbox": "https://blog.example.com/ap/inbox",
+        }
+
+        with patch("pubby.handlers._outbox.requests"):
+            activity = handler_with_attachment.publish_actor_update(document=custom_doc)
+
+        assert activity["type"] == "Update"
+        assert activity["object"] is custom_doc
+        assert activity["object"]["name"] == "Custom Document"
+
+    def test_default_document_built_from_config(self, handler_with_attachment):
+        """Without document=, the actor doc is built from actor_config."""
+        with patch("pubby.handlers._outbox.requests"):
+            activity = handler_with_attachment.publish_actor_update()
+
+        assert activity["object"]["preferredUsername"] == "blog"
+        assert activity["object"]["name"] == "Test Blog"

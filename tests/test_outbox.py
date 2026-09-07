@@ -9,7 +9,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from pubby._model import Follower, Object
-from pubby.handlers._outbox import OutboxProcessor, AS_PUBLIC
+from pubby.handlers._outbox import (
+    AS_PUBLIC,
+    OutboxProcessor,
+    collect_inboxes,
+    deliver_activity,
+)
 
 
 @pytest.fixture
@@ -919,3 +924,340 @@ class TestFetchActorSignedRequest:
         assert "Signature" in call_kwargs["headers"]
         assert "Date" in call_kwargs["headers"]
         assert "Host" in call_kwargs["headers"]
+
+
+class TestCollectInboxesFunction:
+    """Tests for the module-level collect_inboxes helper."""
+
+    def test_shared_inbox_preferred(self):
+        followers = [
+            Follower(
+                actor_id="https://mastodon.social/users/alice",
+                inbox="https://mastodon.social/users/alice/inbox",
+                shared_inbox="https://mastodon.social/inbox",
+            ),
+        ]
+        assert collect_inboxes(followers) == ["https://mastodon.social/inbox"]
+
+    def test_deduplicates_shared_inboxes(self):
+        followers = [
+            Follower(
+                actor_id="https://mastodon.social/users/alice",
+                inbox="https://mastodon.social/users/alice/inbox",
+                shared_inbox="https://mastodon.social/inbox",
+            ),
+            Follower(
+                actor_id="https://mastodon.social/users/bob",
+                inbox="https://mastodon.social/users/bob/inbox",
+                shared_inbox="https://mastodon.social/inbox",
+            ),
+            Follower(
+                actor_id="https://other.example.com/users/carol",
+                inbox="https://other.example.com/users/carol/inbox",
+                shared_inbox="",
+            ),
+        ]
+        assert collect_inboxes(followers) == [
+            "https://mastodon.social/inbox",
+            "https://other.example.com/users/carol/inbox",
+        ]
+
+    def test_skips_followers_without_inbox(self):
+        followers = [
+            Follower(actor_id="https://x.example.com/users/a", inbox=""),
+            Follower(
+                actor_id="https://x.example.com/users/b",
+                inbox="",
+                shared_inbox="",
+            ),
+            Follower(
+                actor_id="https://y.example.com/users/c",
+                inbox="https://y.example.com/users/c/inbox",
+            ),
+        ]
+        assert collect_inboxes(followers) == ["https://y.example.com/users/c/inbox"]
+
+    def test_empty(self):
+        assert collect_inboxes([]) == []
+
+    def test_processor_method_delegates(self, outbox_processor):
+        """OutboxProcessor._collect_inboxes delegates to the module helper."""
+        followers = [
+            Follower(
+                actor_id="https://mastodon.social/users/alice",
+                inbox="https://mastodon.social/users/alice/inbox",
+                shared_inbox="https://mastodon.social/inbox",
+            ),
+        ]
+        assert outbox_processor._collect_inboxes(followers) == collect_inboxes(
+            followers
+        )
+
+
+class TestDeliverActivity:
+    """Tests for the module-level deliver_activity one-shot signed POST."""
+
+    @patch("pubby.handlers._outbox.sign_request")
+    @patch("pubby.handlers._outbox.requests")
+    def test_signs_and_posts_activity(
+        self, mock_requests, mock_sign_request, private_key
+    ):
+        mock_sign_request.return_value = {
+            "Signature": "sig",
+            "Date": "now",
+            "Host": "remote.example.com",
+            "Digest": "SHA-256=...",
+        }
+        mock_resp = MagicMock()
+        mock_resp.status_code = 202
+        mock_requests.post.return_value = mock_resp
+
+        activity = {"id": "act-1", "type": "Create", "object": {}}
+        status = deliver_activity(
+            activity,
+            "https://remote.example.com/inbox",
+            key_id="https://blog.example.com/ap/actor#main-key",
+            private_key=private_key,
+            user_agent="test-agent/1.0",
+        )
+
+        assert status == 202
+
+        mock_sign_request.assert_called_once()
+        sign_kwargs = mock_sign_request.call_args.kwargs
+        assert sign_kwargs["method"] == "POST"
+        assert sign_kwargs["url"] == "https://remote.example.com/inbox"
+        assert sign_kwargs["key_id"] == ("https://blog.example.com/ap/actor#main-key")
+        assert "digest" in [h.lower() for h in sign_kwargs["signed_headers"]]
+        assert "content-type" in [h.lower() for h in sign_kwargs["signed_headers"]]
+
+        post_kwargs = mock_requests.post.call_args.kwargs
+        headers = post_kwargs["headers"]
+        assert headers["Signature"] == "sig"
+        assert headers["Content-Type"] == "application/activity+json"
+        assert headers["User-Agent"] == "test-agent/1.0"
+        assert mock_requests.post.call_args[0][0] == (
+            "https://remote.example.com/inbox"
+        )
+
+    @patch("pubby.handlers._outbox.requests")
+    def test_4xx_status_returned_not_raised(self, mock_requests, private_key):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 410
+        mock_resp.text = "Gone"
+        mock_requests.post.return_value = mock_resp
+
+        status = deliver_activity(
+            {"id": "act-1", "type": "Delete"},
+            "https://remote.example.com/inbox",
+            key_id="https://blog.example.com/ap/actor#main-key",
+            private_key=private_key,
+        )
+        assert status == 410
+
+    @patch("pubby.handlers._outbox.requests")
+    def test_5xx_status_returned_not_raised(self, mock_requests, private_key):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 503
+        mock_resp.text = "Service Unavailable"
+        mock_requests.post.return_value = mock_resp
+
+        status = deliver_activity(
+            {"id": "act-1", "type": "Create"},
+            "https://remote.example.com/inbox",
+            key_id="https://blog.example.com/ap/actor#main-key",
+            private_key=private_key,
+        )
+        assert status == 503
+
+    @patch("pubby.handlers._outbox.requests")
+    def test_default_user_agent(self, mock_requests, private_key):
+        import pubby
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 202
+        mock_requests.post.return_value = mock_resp
+
+        deliver_activity(
+            {"id": "act-1", "type": "Create"},
+            "https://remote.example.com/inbox",
+            key_id="https://blog.example.com/ap/actor#main-key",
+            private_key=private_key,
+        )
+
+        headers = mock_requests.post.call_args.kwargs["headers"]
+        assert headers["User-Agent"] == f"pubby/{pubby.__version__}"
+
+    @patch("pubby.handlers._outbox.requests")
+    def test_network_errors_propagate(self, mock_requests, private_key):
+        import requests as real_requests
+
+        mock_requests.post.side_effect = real_requests.ConnectionError("refused")
+        # Keep the real exception class on the mocked module
+        mock_requests.ConnectionError = real_requests.ConnectionError
+
+        with pytest.raises(real_requests.ConnectionError):
+            deliver_activity(
+                {"id": "act-1", "type": "Create"},
+                "https://remote.example.com/inbox",
+                key_id="https://blog.example.com/ap/actor#main-key",
+                private_key=private_key,
+            )
+
+
+class TestCustomDeliverCallable:
+    """Tests for the pluggable deliver seam on OutboxProcessor."""
+
+    @pytest.fixture
+    def queue_processor(self, mock_storage, private_key):
+        delivered: list[tuple[str, dict]] = []
+        processor = OutboxProcessor(
+            storage=mock_storage,
+            actor_id="https://blog.example.com/ap/actor",
+            private_key=private_key,
+            key_id="https://blog.example.com/ap/actor#main-key",
+            followers_collection_url="https://blog.example.com/ap/followers",
+            deliver=lambda inbox_url, activity: delivered.append((inbox_url, activity)),
+        )
+        return processor, delivered
+
+    @patch("pubby.handlers._outbox.requests")
+    @patch("pubby.handlers._outbox.ThreadPoolExecutor")
+    def test_publish_uses_custom_deliver(
+        self,
+        mock_pool,
+        mock_requests,
+        queue_processor,
+        mock_storage,
+    ):
+        processor, delivered = queue_processor
+        mock_storage.get_followers.return_value = [
+            Follower(
+                actor_id="https://mastodon.social/users/alice",
+                inbox="https://mastodon.social/users/alice/inbox",
+                shared_inbox="https://mastodon.social/inbox",
+            ),
+            Follower(
+                actor_id="https://mastodon.social/users/bob",
+                inbox="https://mastodon.social/users/bob/inbox",
+                shared_inbox="https://mastodon.social/inbox",
+            ),
+            Follower(
+                actor_id="https://other.example.com/users/carol",
+                inbox="https://other.example.com/users/carol/inbox",
+            ),
+        ]
+
+        obj = Object(
+            id="https://blog.example.com/post/1",
+            type="Article",
+            content="<p>Test</p>",
+            attributed_to="https://blog.example.com/ap/actor",
+        )
+        activity = processor.build_create_activity(obj)
+        result = processor.publish(activity)
+
+        # Activity still stored and returned
+        mock_storage.store_activity.assert_called_once()
+        assert result is activity
+
+        # Custom callable got the deduplicated, shared-inbox-preferred set
+        assert [url for url, _ in delivered] == [
+            "https://mastodon.social/inbox",
+            "https://other.example.com/users/carol/inbox",
+        ]
+        assert all(act is activity for _, act in delivered)
+
+        # No thread pool, no direct HTTP
+        mock_pool.assert_not_called()
+        mock_requests.post.assert_not_called()
+
+    @patch("pubby.handlers._outbox.requests")
+    def test_custom_deliver_respects_blocked_instances(
+        self, mock_requests, mock_storage, private_key
+    ):
+        delivered: list[str] = []
+        processor = OutboxProcessor(
+            storage=mock_storage,
+            actor_id="https://blog.example.com/ap/actor",
+            private_key=private_key,
+            key_id="https://blog.example.com/ap/actor#main-key",
+            followers_collection_url="https://blog.example.com/ap/followers",
+            blocked_instances=["spam.example"],
+            deliver=lambda inbox_url, activity: delivered.append(inbox_url),
+        )
+        mock_storage.get_followers.return_value = [
+            Follower(
+                actor_id="https://good.example.com/users/alice",
+                inbox="https://good.example.com/inbox",
+            ),
+            Follower(
+                actor_id="https://spam.example/users/bot",
+                inbox="https://spam.example/inbox",
+            ),
+        ]
+
+        obj = Object(
+            id="https://blog.example.com/post/1",
+            type="Article",
+            content="<p>Test</p>",
+            attributed_to="https://blog.example.com/ap/actor",
+        )
+        processor.publish(processor.build_create_activity(obj))
+
+        assert delivered == ["https://good.example.com/inbox"]
+
+    @patch("pubby.handlers._outbox.requests")
+    def test_custom_deliver_error_does_not_stop_others(
+        self, mock_requests, mock_storage, private_key
+    ):
+        delivered: list[str] = []
+
+        def flaky(inbox_url, activity):
+            if "bad" in inbox_url:
+                raise RuntimeError("queue down")
+            delivered.append(inbox_url)
+
+        processor = OutboxProcessor(
+            storage=mock_storage,
+            actor_id="https://blog.example.com/ap/actor",
+            private_key=private_key,
+            key_id="https://blog.example.com/ap/actor#main-key",
+            followers_collection_url="https://blog.example.com/ap/followers",
+            deliver=flaky,
+        )
+        mock_storage.get_followers.return_value = [
+            Follower(
+                actor_id="https://bad.example.com/users/a",
+                inbox="https://bad.example.com/inbox",
+            ),
+            Follower(
+                actor_id="https://good.example.com/users/b",
+                inbox="https://good.example.com/inbox",
+            ),
+        ]
+
+        obj = Object(
+            id="https://blog.example.com/post/1",
+            type="Article",
+            content="<p>Test</p>",
+            attributed_to="https://blog.example.com/ap/actor",
+        )
+        processor.publish(processor.build_create_activity(obj))
+
+        assert delivered == ["https://good.example.com/inbox"]
+
+    def test_handler_forwards_deliver(self, mock_storage, private_key):
+        from pubby.handlers import ActivityPubHandler
+
+        sentinel = lambda inbox_url, activity: None  # noqa: E731
+        handler = ActivityPubHandler(
+            storage=mock_storage,
+            actor_config={
+                "base_url": "https://blog.example.com",
+                "username": "blog",
+            },
+            private_key=private_key,
+            deliver=sentinel,
+        )
+        assert handler.outbox.deliver is sentinel

@@ -67,7 +67,8 @@ src/python/pubby/
 ├── handlers/
 │   ├── _handler.py          # ActivityPubHandler — main façade
 │   ├── _inbox.py            # InboxProcessor — incoming activity dispatch
-│   ├── _outbox.py           # OutboxProcessor — build activities, fan-out delivery
+│   ├── _outbox.py           # OutboxProcessor — build activities, fan-out delivery;
+│   │                        #   module helpers collect_inboxes() / deliver_activity()
 │   ├── _discovery.py        # WebFinger & NodeInfo response builders
 │   └── _client.py           # Default User-Agent helper
 │
@@ -207,7 +208,7 @@ Public methods:
 | `process_inbox_activity()` | Delegate an incoming activity to `InboxProcessor`. |
 | `publish_object(obj, activity_type)` | Build a Create / Update / Delete activity and fan-out via `OutboxProcessor`. |
 | `publish_activity(activity)` | Publish a pre-built activity dict as-is (Like, Undo, Announce, Follow, etc.). |
-| `publish_actor_update()` | Push the current actor profile to all followers. |
+| `publish_actor_update(document=None)` | Push the actor profile to all followers; accepts an optional prebuilt actor document. |
 | `get_actor_document()` | Build the actor's JSON-LD representation. |
 | `get_outbox()` | Return the outbox `OrderedCollection`. |
 | `get_followers_collection(actor_id=None)` | Return the followers `OrderedCollection`, optionally filtered by actor. |
@@ -254,15 +255,24 @@ Responsible for:
    `build_like_activity()`, `build_announce_activity()`,
    `build_undo_activity()`.
 2. **Publishing** — `publish(activity)` stores the activity, collects
-   follower inboxes (preferring shared inboxes for deduplication), then
-   fans out delivery concurrently via `ThreadPoolExecutor`.
+   follower inboxes (preferring shared inboxes for deduplication, via the
+   module-level `collect_inboxes()` helper), then fans out delivery
+   concurrently via `ThreadPoolExecutor`.
    When `async_delivery=True`, delivery runs in a background daemon thread
    so `publish()` returns immediately without blocking on slow/unreachable
    inboxes.
    Collected inboxes are filtered against the configured instance
    allow/block lists (`pubby.moderation`), and recipient actor documents
    on blocked/non-allowed domains are never fetched.
-3. **Retry** — `_deliver_with_retry()` uses exponential backoff
+3. **Pluggable delivery** — when a `deliver` callable is supplied (also
+   exposed on `ActivityPubHandler`), `publish()` invokes
+   `deliver(inbox_url, activity)` once per collected inbox instead of the
+   `ThreadPoolExecutor` fan-out, letting applications route deliveries
+   through a task queue while keeping inbox collection, dedup, and
+   instance filtering.  The module-level `deliver_activity()` performs a
+   single signed POST and returns the HTTP status code, so queue workers
+   can apply their own retry policy.
+4. **Retry** — `_deliver_with_retry()` uses exponential backoff
    (`retry_base_delay × 2^attempt`); 5xx responses and connection errors
    are retried, 4xx errors are not.
 
@@ -548,7 +558,8 @@ pubby.__init__
 
 5. **Concurrent delivery** — `OutboxProcessor` uses
    `ThreadPoolExecutor` for fan-out, with shared-inbox deduplication and
-   exponential-backoff retry.
+   exponential-backoff retry.  A `deliver` callable can replace the thread
+   pool entirely so applications fan out via their own task queue.
 
 6. **Mastodon compatibility layer** — a read-only Mastodon REST API
    surface is separated into framework-agnostic mappers + route handlers,

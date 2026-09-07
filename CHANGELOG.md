@@ -33,6 +33,20 @@ All notable changes to this project will be documented in this file.
 - The Mastodon `activity_to_status` mapper now extracts a single displayable
   URL from objects whose `url` is a list of `Link` dicts, preferring
   `text/html`/`rel="alternate"` entries.
+- **Pluggable delivery seam**: `ActivityPubHandler` and `OutboxProcessor`
+  accept a `deliver` callable invoked once per collected inbox as
+  `deliver(inbox_url, activity)` instead of the built-in
+  `ThreadPoolExecutor` fan-out, so applications can route deliveries through
+  a task queue while keeping inbox collection, deduplication, and instance
+  allow/block filtering.
+- `pubby.collect_inboxes(followers)` exposes the shared-inbox-preferred,
+  deduplicated inbox collection used by `publish()`, and
+  `pubby.deliver_activity(activity, inbox_url, key_id=..., private_key=...)`
+  performs a single signed POST and returns the HTTP status code (4xx/5xx
+  statuses are returned, not raised) for use inside custom delivery workers.
+- `publish_actor_update(document=None)` accepts an optional prebuilt actor
+  document used as the activity's `object` instead of the document built
+  from `actor_config`.
 
 ## 0.2.23
 
