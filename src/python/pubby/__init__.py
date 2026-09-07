@@ -35,6 +35,7 @@ from .content import (
 from .handlers import ActivityPubHandler
 from .handlers._outbox import (
     build_announce_activity,
+    build_delete_activity,
     build_like_activity,
     build_undo_activity,
     collect_inboxes,
@@ -55,6 +56,7 @@ __all__ = [
     "Actor",
     "ActorConfig",
     "build_announce_activity",
+    "build_delete_activity",
     "build_hashtag_tags",
     "build_like_activity",
     "build_undo_activity",

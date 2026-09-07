@@ -13,6 +13,7 @@ from pubby.handlers._outbox import (
     AS_PUBLIC,
     OutboxProcessor,
     build_announce_activity,
+    build_delete_activity,
     build_like_activity,
     build_undo_activity,
     collect_inboxes,
@@ -79,8 +80,37 @@ class TestBuildActivities:
             "https://blog.example.com/post/1"
         )
         assert activity["type"] == "Delete"
+        assert activity["actor"] == "https://blog.example.com/ap/actor"
         assert activity["object"]["type"] == "Tombstone"
         assert activity["object"]["id"] == "https://blog.example.com/post/1"
+        assert AS_PUBLIC in activity["to"]
+        assert "https://blog.example.com/ap/followers" in activity["cc"]
+        assert "published" in activity
+        assert "id" in activity
+
+    def test_build_delete_activity_no_followers_url(self, mock_storage, private_key):
+        processor = OutboxProcessor(
+            storage=mock_storage,
+            actor_id="https://blog.example.com/ap/actor",
+            private_key=private_key,
+            key_id="https://blog.example.com/ap/actor#main-key",
+            followers_collection_url="",
+        )
+        activity = processor.build_delete_activity("https://blog.example.com/post/1")
+        assert activity["cc"] == []
+        assert AS_PUBLIC in activity["to"]
+
+    @patch("pubby.handlers._outbox.build_delete_activity")
+    def test_build_delete_activity_delegates(self, mock_build_delete, outbox_processor):
+        from pubby._model import AP_CONTEXT
+
+        outbox_processor.build_delete_activity("https://blog.example.com/post/1")
+        mock_build_delete.assert_called_once_with(
+            actor_id="https://blog.example.com/ap/actor",
+            object_id="https://blog.example.com/post/1",
+            cc=["https://blog.example.com/ap/followers"],
+            context=AP_CONTEXT,
+        )
 
     def test_build_like_activity(self, outbox_processor):
         activity = outbox_processor.build_like_activity(
@@ -332,6 +362,52 @@ class TestFreeBuildActivities:
         )
         assert undo["to"] == [AS_PUBLIC]
         assert undo["cc"] == []
+
+    def test_build_delete_activity_defaults(self):
+        activity = build_delete_activity(
+            actor_id="https://blog.example.com/ap/actor",
+            object_id="https://blog.example.com/post/1",
+        )
+        assert activity["type"] == "Delete"
+        assert activity["actor"] == "https://blog.example.com/ap/actor"
+        assert activity["object"]["type"] == "Tombstone"
+        assert activity["object"]["id"] == "https://blog.example.com/post/1"
+        assert AS_PUBLIC in activity["to"]
+        assert activity["cc"] == ["https://blog.example.com/ap/actor/followers"]
+        assert "published" in activity
+        assert "id" in activity
+        assert activity["id"].startswith(
+            "https://blog.example.com/ap/actor/activities/"
+        )
+
+    def test_build_delete_activity_explicit_id_and_published(self):
+        ts = datetime(2025, 3, 14, 12, 0, 0, tzinfo=timezone.utc)
+        activity = build_delete_activity(
+            actor_id="https://blog.example.com/ap/actor",
+            object_id="https://blog.example.com/post/1",
+            activity_id="https://blog.example.com/activities/delete-1",
+            published=ts,
+        )
+        assert activity["id"] == "https://blog.example.com/activities/delete-1"
+        assert activity["published"] == ts.isoformat()
+
+    def test_build_delete_activity_explicit_audience(self):
+        activity = build_delete_activity(
+            actor_id="https://blog.example.com/ap/actor",
+            object_id="https://blog.example.com/post/1",
+            to=["https://remote.example.com/users/bob"],
+            cc=["https://specific.example.com/users/alice"],
+        )
+        assert activity["to"] == ["https://remote.example.com/users/bob"]
+        assert activity["cc"] == ["https://specific.example.com/users/alice"]
+
+    def test_build_delete_activity_context_override(self):
+        activity = build_delete_activity(
+            actor_id="https://blog.example.com/ap/actor",
+            object_id="https://blog.example.com/post/1",
+            context="https://www.w3.org/ns/activitystreams",
+        )
+        assert activity["@context"] == "https://www.w3.org/ns/activitystreams"
 
 
 class TestCollectInboxes:

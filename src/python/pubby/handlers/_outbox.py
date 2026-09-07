@@ -304,6 +304,57 @@ def build_undo_activity(
     }
 
 
+def build_delete_activity(
+    actor_id: str,
+    object_id: str,
+    *,
+    to: list[str] | None = None,
+    cc: list[str] | None = None,
+    activity_id: str | None = None,
+    published: datetime | str | None = None,
+    context: Any = AP_CONTEXT,
+) -> dict:
+    """
+    Build a Delete activity wrapping a Tombstone for ``object_id``.
+
+    When ``to`` is omitted the activity is addressed to the public
+    ActivityStreams collection. When ``cc`` is omitted it defaults to the
+    actor's followers collection via ``{actor_id}/followers``.
+
+    :param actor_id: The actor ID (URL) performing the Delete.
+    :param object_id: The URL of the object being deleted.
+    :param to: Optional explicit ``to`` recipients. Defaults to public.
+    :param cc: Optional explicit ``cc`` recipients. Defaults to
+        ``[f"{actor_id}/followers"]``.
+    :param activity_id: Optional explicit activity ID. If not provided, a
+        new unique ID is generated under ``actor_id``.
+    :param published: Optional publication timestamp. A ``datetime`` is
+        converted with ``.isoformat()``; a ``str`` is used as-is;
+        ``None`` defaults to the current UTC time.
+    :param context: Optional JSON-LD ``@context`` value. Defaults to
+        ``AP_CONTEXT``.
+    :return: The Delete activity as a JSON-LD dictionary.
+    """
+    if to is None:
+        to = [AS_PUBLIC]
+    if cc is None:
+        cc = [f"{actor_id}/followers"]
+
+    return {
+        "@context": context,
+        "id": activity_id or _new_activity_id(actor_id),
+        "type": "Delete",
+        "actor": actor_id,
+        "published": _format_published(published),
+        "to": to,
+        "cc": cc,
+        "object": {
+            "id": object_id,
+            "type": "Tombstone",
+        },
+    }
+
+
 class OutboxProcessor:
     """
     Handles outbound activity creation and delivery.
@@ -451,26 +502,12 @@ class OutboxProcessor:
         :param object_id: The ID of the object to delete.
         :return: The activity as a JSON-LD dictionary.
         """
-        activity_id = self._new_activity_id()
-        now = datetime.now(timezone.utc)
-
-        activity = {
-            "@context": AP_CONTEXT,
-            "id": activity_id,
-            "type": "Delete",
-            "actor": self.actor_id,
-            "published": now.isoformat(),
-            "to": [AS_PUBLIC],
-            "cc": (
-                [self.followers_collection_url] if self.followers_collection_url else []
-            ),
-            "object": {
-                "id": object_id,
-                "type": "Tombstone",
-            },
-        }
-
-        return activity
+        return build_delete_activity(
+            actor_id=self.actor_id,
+            object_id=object_id,
+            cc=[self.followers_collection_url] if self.followers_collection_url else [],
+            context=AP_CONTEXT,
+        )
 
     def build_like_activity(
         self,

@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- New module-level `pubby.build_delete_activity` builder for `Delete(Tombstone)`
+  activities, with explicit `actor_id`, `to`/`cc`, `activity_id`, `published`,
+  and `@context` parameters.
+- `OutboxProcessor.build_delete_activity` is now a thin wrapper around the
+  module-level builder, preserving `followers_collection_url` as the default
+  `cc` audience.
+
 ## 0.3.1
 
 ### Added

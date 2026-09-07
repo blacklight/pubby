@@ -256,8 +256,9 @@ Responsible for:
    `build_like_activity()`, `build_announce_activity()`,
    `build_undo_activity()`.  These are thin wrappers around the
    module-level `build_like_activity()`, `build_announce_activity()`,
-   and `build_undo_activity()` helpers, which accept explicit
-   `actor_id`, `to`/`cc`, `activity_id`, `published`, and `@context`.
+   `build_delete_activity()`, and `build_undo_activity()` helpers, which
+   accept explicit `actor_id`, `to`/`cc`, `activity_id`, `published`,
+   and `@context`.
 2. **Publishing** — `publish(activity)` stores the activity, collects
    follower inboxes (preferring shared inboxes for deduplication, via the
    module-level `collect_inboxes()` helper), then fans out delivery

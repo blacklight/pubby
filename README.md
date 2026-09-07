@@ -1210,6 +1210,11 @@ handler.publish_activity(like)
 boost = handler.outbox.build_announce_activity("https://remote.example.com/post/42")
 handler.publish_activity(boost)
 
+# Delete a local post
+handler.publish_activity(
+    handler.outbox.build_delete_activity("https://example.com/posts/hello-world")
+)
+
 # Undo the like
 undo = handler.outbox.build_undo_activity(like)
 handler.publish_activity(undo)
@@ -1219,6 +1224,7 @@ Available builders on `handler.outbox`:
 
 | Builder | Returns |
 |---|---|
+| `build_delete_activity(object_id)` | `Delete` activity dict wrapping a `Tombstone` |
 | `build_like_activity(object_url, *, activity_id=None, published=None)` | `Like` activity dict |
 | `build_announce_activity(object_url, *, activity_id=None, published=None)` | `Announce` (boost) activity dict |
 | `build_undo_activity(inner_activity)` | `Undo` activity dict wrapping any activity |
@@ -1232,7 +1238,12 @@ You can also build payloads without a handler. This is useful when your
 application controls addressing, timestamps, or activity IDs itself:
 
 ```python
-from pubby import build_like_activity, build_announce_activity, build_undo_activity
+from pubby import (
+    build_announce_activity,
+    build_delete_activity,
+    build_like_activity,
+    build_undo_activity,
+)
 from datetime import datetime, timezone
 
 like = build_like_activity(
@@ -1245,6 +1256,12 @@ like = build_like_activity(
 )
 
 undo = build_undo_activity(like, actor_id="https://example.com/ap/actor")
+
+# Delete a local object by wrapping it in a Tombstone
+delete = build_delete_activity(
+    actor_id="https://example.com/ap/actor",
+    object_id="https://example.com/posts/hello-world",
+)
 ```
 
 These free functions are the same helpers `handler.outbox` uses internally,
