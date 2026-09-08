@@ -419,10 +419,12 @@ inbound HTML): `pubby.content` escapes all input and only emits anchors for
 validated `http`/`https` URLs.
 
 - **`render_post_html(text, hashtag_url)`** — escapes text, linkifies URLs,
-  turns `#hashtags` into `rel="tag"` links, and returns a `RenderedContent`
+  turns `#hashtags` into `rel="tag"` links, converts newlines to `<br>`
+  elements (remote servers render `content`/`summary` as HTML, where a
+  literal newline would collapse), and returns a `RenderedContent`
   dataclass with the HTML and a deduplicated list of normalized tag names.
 - **`render_bio_html(bio)`** — escapes bio text and linkifies URLs without
-  hashtag processing.
+  hashtag processing; newlines become `<br>` elements as above.
 - **`build_hashtag_tags(names, hashtag_url)`** — maps normalized tag names to
   ActivityPub `Hashtag` tag dicts, preserving order and without deduplication.
 - **`set_object_content(obj, text, hashtag_url)`** — renders plain text into

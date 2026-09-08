@@ -117,13 +117,27 @@ def _split_trailing_punctuation(url: str) -> Tuple[str, str]:
     return url, trailing
 
 
+def _escape_text(text: str) -> str:
+    """
+    Escape plain text for HTML output, preserving line breaks.
+
+    ``\r\n`` and ``\r`` are normalized to ``\n``, and newlines are emitted
+    as ``<br>`` elements: ActivityPub ``content``/``summary`` are HTML
+    fields, so a literal newline would collapse to a space on remote
+    renderers (e.g. Mastodon).
+    """
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    return html.escape(normalized).replace("\n", "<br>")
+
+
 def render_bio_html(bio: str) -> str:
     """
     Render profile bio text for an actor ``summary`` field.
 
     The text is HTML-escaped and any http(s) URLs are turned into anchors so
-    remote servers render them as clickable links.  Matches that fail
-    :func:`is_linkable_url` are left as escaped text.
+    remote servers render them as clickable links.  Newlines become ``<br>``
+    elements so line breaks survive remote HTML rendering.  Matches that
+    fail :func:`is_linkable_url` are left as escaped text.
     """
     parts: List[str] = []
     pos = 0
@@ -132,12 +146,12 @@ def render_bio_html(bio: str) -> str:
         url, trailing = _split_trailing_punctuation(match.group(0))
         if not is_linkable_url(url):
             continue
-        parts.append(html.escape(bio[pos : match.start()]))
+        parts.append(_escape_text(bio[pos : match.start()]))
         parts.append(render_link_anchor(url))
         parts.append(html.escape(trailing))
         pos = match.end()
 
-    parts.append(html.escape(bio[pos:]))
+    parts.append(_escape_text(bio[pos:]))
     return "".join(parts)
 
 
@@ -156,7 +170,8 @@ def render_post_html(text: str, hashtag_url: Callable[[str], str]) -> RenderedCo
     The text is HTML-escaped, http(s) URLs become anchors with scheme-less link
     text, and ``#hashtags`` become ``rel="tag"`` links produced by the supplied
     ``hashtag_url`` callback.  Matches that fail validation are emitted as
-    escaped text.
+    escaped text.  Newlines become ``<br>`` elements so line breaks survive
+    remote HTML rendering.
 
     :param text: The raw post text.
     :param hashtag_url: Callable that receives a normalized hashtag name and
@@ -170,7 +185,7 @@ def render_post_html(text: str, hashtag_url: Callable[[str], str]) -> RenderedCo
 
     for match in _POST_TOKEN_RE.finditer(text):
         token = match.group(0)
-        parts.append(html.escape(text[pos : match.start()]))
+        parts.append(_escape_text(text[pos : match.start()]))
         pos = match.end()
 
         if token.startswith("#"):
@@ -193,7 +208,7 @@ def render_post_html(text: str, hashtag_url: Callable[[str], str]) -> RenderedCo
         else:
             parts.append(html.escape(token))
 
-    parts.append(html.escape(text[pos:]))
+    parts.append(_escape_text(text[pos:]))
     return RenderedContent("".join(parts), hashtags)
 
 

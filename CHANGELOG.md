@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- `render_post_html` and `render_bio_html` now convert newlines (`\n`,
+  `\r\n`, `\r`) to `<br>` elements: ActivityPub `content`/`summary` are
+  HTML fields, and remote servers such as Mastodon collapse literal
+  newlines into spaces, silently stripping line breaks from federated
+  posts and bios.
+
 ## 0.3.3
 
 ### Added

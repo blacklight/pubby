@@ -132,6 +132,12 @@ class TestRenderBioHtml:
         assert render_bio_html("plain text") == "plain text"
         assert render_bio_html("") == ""
 
+    def test_newlines_become_br(self):
+        assert render_bio_html("line one\nline two") == "line one<br>line two"
+
+    def test_normalizes_crlf_and_cr(self):
+        assert render_bio_html("a\r\nb\rc") == "a<br>b<br>c"
+
 
 class TestRenderPostHtml:
     def test_linkifies_urls_and_hashtags(self, hashtag_url):
@@ -184,6 +190,23 @@ class TestRenderPostHtml:
             '<a href="https://e.com/a_(b)">e.com/a_(b)</a>.'
         )
         assert rc.hashtags == ["tag1"]
+
+    def test_newlines_become_br(self, hashtag_url):
+        rc = render_post_html("line one\n\nline two", hashtag_url)
+        assert rc.html == "line one<br><br>line two"
+
+    def test_newlines_around_tokens(self, hashtag_url):
+        rc = render_post_html("a\n#tag\nhttps://e.com/x", hashtag_url)
+        assert rc.html == (
+            "a<br>"
+            '<a href="https://blog.example.com/tags/tag" rel="tag">#tag</a><br>'
+            '<a href="https://e.com/x">e.com/x</a>'
+        )
+        assert rc.hashtags == ["tag"]
+
+    def test_normalizes_crlf_and_cr(self, hashtag_url):
+        rc = render_post_html("a\r\nb\rc", hashtag_url)
+        assert rc.html == "a<br>b<br>c"
 
 
 class TestBuildHashtagTags:

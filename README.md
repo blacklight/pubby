@@ -1327,8 +1327,8 @@ tags = build_hashtag_tags(rc.hashtags, lambda name: f"https://example.com/tags/{
 
 | Function | Description |
 |---|---|
-| `render_post_html(text, hashtag_url)` | Render a post with URL + hashtag linkification. |
-| `render_bio_html(bio)` | Render a bio with URL linkification only. |
+| `render_post_html(text, hashtag_url)` | Render a post with URL + hashtag linkification; newlines become `<br>`. |
+| `render_bio_html(bio)` | Render a bio with URL linkification only; newlines become `<br>`. |
 | `build_hashtag_tags(names, hashtag_url)` | Build `Hashtag` tag dicts from normalized names. |
 | `set_object_content(obj, text, hashtag_url)` | Set `obj['content']` from plain text and merge detected hashtags into `obj['tag']`. |
 | `format_duration(seconds)` | Format seconds as an ISO-8601 duration (`PT[h]H[m]M[s]S`) for media objects. |
