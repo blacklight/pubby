@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- New module-level `pubby.build_update_activity` builder for `Update`
+  activities wrapping a full object document, with explicit `actor_id`,
+  `to`/`cc`, `activity_id`, `published`, `updated`, and `@context`
+  parameters. The embedded object's `to`/`cc` are synced to the envelope's
+  audience and `updated` is stamped (defaulting to `published`).
+- `OutboxProcessor.build_update_activity` is now a thin wrapper around the
+  module-level builder, preserving its explicit-addressing and
+  `followers_collection_url` defaults.
+
 ## 0.3.2
 
 ### Added

@@ -16,6 +16,7 @@ from pubby.handlers._outbox import (
     build_delete_activity,
     build_like_activity,
     build_undo_activity,
+    build_update_activity,
     collect_inboxes,
     deliver_activity,
 )
@@ -74,6 +75,75 @@ class TestBuildActivities:
         activity = outbox_processor.build_update_activity(obj)
         assert activity["type"] == "Update"
         assert activity["object"]["name"] == "Updated Post"
+        assert activity["object"]["updated"] == activity["published"]
+        assert AS_PUBLIC in activity["to"]
+        assert "https://blog.example.com/ap/followers" in activity["cc"]
+
+    @patch("pubby.handlers._outbox.build_update_activity")
+    def test_build_update_activity_delegates(self, mock_build_update, outbox_processor):
+        from pubby._model import AP_CONTEXT
+
+        obj = Object(
+            id="https://blog.example.com/post/1",
+            type="Article",
+            name="Updated Post",
+        )
+        outbox_processor.build_update_activity(obj)
+        mock_build_update.assert_called_once_with(
+            actor_id="https://blog.example.com/ap/actor",
+            object_doc=obj.to_dict(),
+            to=[AS_PUBLIC],
+            cc=["https://blog.example.com/ap/followers"],
+            context=AP_CONTEXT,
+        )
+
+    def test_module_build_update_activity(self):
+        """The module-level builder embeds the full object with synced audience."""
+        object_doc = {
+            "id": "https://blog.example.com/post/1",
+            "type": "Article",
+            "name": "Updated Post",
+            "to": ["https://stale.example/audience"],
+        }
+        activity = build_update_activity(
+            actor_id="https://blog.example.com/ap/actor",
+            object_doc=object_doc,
+        )
+
+        assert activity["type"] == "Update"
+        assert activity["actor"] == "https://blog.example.com/ap/actor"
+        assert activity["id"].startswith(
+            "https://blog.example.com/ap/actor/activities/"
+        )
+        assert activity["to"] == [AS_PUBLIC]
+        assert activity["cc"] == ["https://blog.example.com/ap/actor/followers"]
+        obj = activity["object"]
+        assert obj["id"] == object_doc["id"]
+        assert obj["name"] == "Updated Post"
+        assert obj["to"] == activity["to"]
+        assert obj["cc"] == activity["cc"]
+        assert obj["updated"] == activity["published"]
+        # The source document is not mutated.
+        assert object_doc["to"] == ["https://stale.example/audience"]
+        assert "updated" not in object_doc
+
+    def test_module_build_update_activity_explicit_addressing(self):
+        """Explicit to/cc drive both the envelope and the embedded object."""
+        activity = build_update_activity(
+            actor_id="https://blog.example.com/ap/actor",
+            object_doc={"id": "https://blog.example.com/post/1"},
+            to=["https://remote.example.com/users/bob"],
+            cc=[],
+            activity_id="https://blog.example.com/activities/u1",
+            published=datetime(2025, 3, 14, 12, 0, 0, tzinfo=timezone.utc),
+            updated="2025-03-14T13:00:00+00:00",
+        )
+
+        assert activity["id"] == "https://blog.example.com/activities/u1"
+        assert activity["to"] == ["https://remote.example.com/users/bob"]
+        assert activity["cc"] == []
+        assert activity["published"] == "2025-03-14T12:00:00+00:00"
+        assert activity["object"]["updated"] == "2025-03-14T13:00:00+00:00"
 
     def test_build_delete_activity(self, outbox_processor):
         activity = outbox_processor.build_delete_activity(

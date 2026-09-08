@@ -38,6 +38,7 @@ from .handlers._outbox import (
     build_delete_activity,
     build_like_activity,
     build_undo_activity,
+    build_update_activity,
     collect_inboxes,
     deliver_activity,
 )
@@ -60,6 +61,7 @@ __all__ = [
     "build_hashtag_tags",
     "build_like_activity",
     "build_undo_activity",
+    "build_update_activity",
     "collect_inboxes",
     "deliver_activity",
     "DeliveryError",

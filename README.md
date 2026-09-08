@@ -1210,6 +1210,9 @@ handler.publish_activity(like)
 boost = handler.outbox.build_announce_activity("https://remote.example.com/post/42")
 handler.publish_activity(boost)
 
+# Update a local post (e.g. after an edit)
+handler.publish_activity(handler.outbox.build_update_activity(updated_object))
+
 # Delete a local post
 handler.publish_activity(
     handler.outbox.build_delete_activity("https://example.com/posts/hello-world")
@@ -1228,6 +1231,7 @@ Available builders on `handler.outbox`:
 | `build_like_activity(object_url, *, activity_id=None, published=None)` | `Like` activity dict |
 | `build_announce_activity(object_url, *, activity_id=None, published=None)` | `Announce` (boost) activity dict |
 | `build_undo_activity(inner_activity)` | `Undo` activity dict wrapping any activity |
+| `build_update_activity(obj)` | `Update` activity dict wrapping the updated `Object` |
 
 `build_undo_activity` is intentionally generic — it works for
 `Undo Like`, `Undo Announce`, `Undo Follow`, etc.
@@ -1243,6 +1247,7 @@ from pubby import (
     build_delete_activity,
     build_like_activity,
     build_undo_activity,
+    build_update_activity,
 )
 from datetime import datetime, timezone
 
@@ -1261,6 +1266,13 @@ undo = build_undo_activity(like, actor_id="https://example.com/ap/actor")
 delete = build_delete_activity(
     actor_id="https://example.com/ap/actor",
     object_id="https://example.com/posts/hello-world",
+)
+
+# Announce an edited object: the embedded document gets the activity's
+# to/cc audience and an `updated` stamp (defaulting to `published`)
+update = build_update_activity(
+    actor_id="https://example.com/ap/actor",
+    object_doc=updated_post_document,
 )
 ```
 

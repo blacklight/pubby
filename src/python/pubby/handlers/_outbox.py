@@ -355,6 +355,71 @@ def build_delete_activity(
     }
 
 
+def build_update_activity(
+    actor_id: str,
+    object_doc: dict,
+    *,
+    to: list[str] | None = None,
+    cc: list[str] | None = None,
+    activity_id: str | None = None,
+    published: datetime | str | None = None,
+    updated: datetime | str | None = None,
+    context: Any = AP_CONTEXT,
+) -> dict:
+    """
+    Build an Update activity wrapping an updated object document.
+
+    The embedded object is ``object_doc`` with its ``to``/``cc`` rewritten
+    to the activity's audience and ``updated`` stamped — remote servers
+    (e.g. Mastodon) use ``updated`` to surface the edit. ``object_doc``
+    itself is not mutated.
+
+    When ``to`` is omitted the activity is addressed to the public
+    ActivityStreams collection. When ``cc`` is omitted it defaults to the
+    actor's followers collection via ``{actor_id}/followers``.
+
+    :param actor_id: The actor ID (URL) performing the Update.
+    :param object_doc: The updated object document (should contain ``id``).
+    :param to: Optional explicit ``to`` recipients. Defaults to public.
+    :param cc: Optional explicit ``cc`` recipients. Defaults to
+        ``[f"{actor_id}/followers"]``.
+    :param activity_id: Optional explicit activity ID. If not provided, a
+        new unique ID is generated under ``actor_id``.
+    :param published: Optional publication timestamp. A ``datetime`` is
+        converted with ``.isoformat()``; a ``str`` is used as-is;
+        ``None`` defaults to the current UTC time.
+    :param updated: Optional edit timestamp stamped on the embedded object.
+        ``None`` defaults to the activity's ``published`` value.
+    :param context: Optional JSON-LD ``@context`` value. Defaults to
+        ``AP_CONTEXT``.
+    :return: The Update activity as a JSON-LD dictionary.
+    """
+    if to is None:
+        to = [AS_PUBLIC]
+    if cc is None:
+        cc = [f"{actor_id}/followers"]
+
+    published_str = _format_published(published)
+
+    return {
+        "@context": context,
+        "id": activity_id or _new_activity_id(actor_id),
+        "type": "Update",
+        "actor": actor_id,
+        "published": published_str,
+        "to": to,
+        "cc": cc,
+        "object": {
+            **object_doc,
+            "to": to,
+            "cc": cc,
+            "updated": (
+                _format_published(updated) if updated is not None else published_str
+            ),
+        },
+    }
+
+
 class OutboxProcessor:
     """
     Handles outbound activity creation and delivery.
@@ -467,33 +532,24 @@ class OutboxProcessor:
         :param obj: The updated object.
         :return: The activity as a JSON-LD dictionary.
         """
-        activity_id = self._new_activity_id()
-        now = datetime.now(timezone.utc)
-
         # If addressing is explicitly provided (either to or cc has values),
         # use it as-is. Otherwise, apply defaults.
         has_explicit_addressing = bool(obj.to) or bool(obj.cc)
-        to_field = obj.to if has_explicit_addressing else [AS_PUBLIC]
-        cc_field = (
-            obj.cc
-            if has_explicit_addressing
-            else (
-                [self.followers_collection_url] if self.followers_collection_url else []
-            )
+        return build_update_activity(
+            actor_id=self.actor_id,
+            object_doc=obj.to_dict(),
+            to=obj.to if has_explicit_addressing else [AS_PUBLIC],
+            cc=(
+                obj.cc
+                if has_explicit_addressing
+                else (
+                    [self.followers_collection_url]
+                    if self.followers_collection_url
+                    else []
+                )
+            ),
+            context=AP_CONTEXT,
         )
-
-        activity = {
-            "@context": AP_CONTEXT,
-            "id": activity_id,
-            "type": "Update",
-            "actor": self.actor_id,
-            "published": now.isoformat(),
-            "to": to_field,
-            "cc": cc_field,
-            "object": obj.to_dict(),
-        }
-
-        return activity
 
     def build_delete_activity(self, object_id: str) -> dict:
         """
