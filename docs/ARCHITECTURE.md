@@ -278,7 +278,16 @@ QuoteRequest → _handle_quote_request (FEP-044f: auto-approve quotes)
 ```
 
 Before dispatching, `verify_signature()` checks the HTTP Signature header
-by fetching the sender's public key (with actor caching).  When
+by fetching the sender's public key (with actor caching), and binds the
+verified signer to the activity: the `keyId`'s actor must equal
+`activity.actor`, or the claimed actor's document must advertise the key
+(`publicKey.id == keyId`; `publicKey` may be a list).  Signer/actor
+mismatches raise `SignatureVerificationError`.  Verification is required
+unless `skip_verification=True` — calling `process()` without request
+headers raises rather than silently skipping the check.  Consequently,
+relays that forward the original activity body signed with the relay's
+key are rejected (pubby does not verify embedded Linked Data
+signatures); Announce-wrapped relayed content is unaffected.  When
 `allowed_instances`/`blocked_instances` are configured, the activity's
 `actor` domain is checked first and rejected instances are dropped without
 any network call (see `pubby.moderation`).  When `strict_attribution` is

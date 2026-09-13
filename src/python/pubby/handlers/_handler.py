@@ -216,7 +216,9 @@ class ActivityPubHandler:
         :param activity_data: Parsed activity JSON-LD.
         :param method: HTTP method of the incoming request.
         :param path: Request path.
-        :param headers: Request headers.
+        :param headers: Request headers. Required unless
+            ``skip_verification`` is set — the verified signature is what
+            authenticates ``activity.actor``.
         :param body: Raw request body.
         :param skip_verification: Skip HTTP signature verification.
         :return: Response data or None.

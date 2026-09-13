@@ -164,6 +164,7 @@ class InboxProcessor:
         path: str,
         headers: dict[str, str],
         body: bytes | None = None,
+        expected_actor: str | None = None,
     ) -> str:
         """
         Verify the HTTP signature on an incoming request.
@@ -172,8 +173,16 @@ class InboxProcessor:
         :param path: Request path.
         :param headers: Request headers.
         :param body: Request body.
+        :param expected_actor: When given, the actor the request claims to
+            act as (``activity.actor``). The verified key owner must equal
+            it, or the claimed actor's document must advertise the signing
+            key — its ``publicKey.id`` must equal the signature's
+            ``keyId``. This binds the authenticated signer to the claimed
+            actor so a valid signature from one actor cannot be used to
+            attribute activities to another.
         :return: The actor ID (key owner) from the signature.
-        :raises SignatureVerificationError: If the signature is invalid.
+        :raises SignatureVerificationError: If the signature is invalid or
+            the signer is not the expected actor.
         """
         # Parse the Signature header to find keyId
         lower_headers = {k.lower(): v for k, v in headers.items()}
@@ -214,7 +223,39 @@ class InboxProcessor:
 
         public_key = load_public_key(public_key_pem)
         verify_request(public_key, method, path, headers, body)
+
+        if expected_actor and expected_actor != actor_url:
+            self._verify_key_ownership(key_id, expected_actor)
+
         return actor_url
+
+    def _verify_key_ownership(self, key_id: str, expected_actor: str) -> None:
+        """
+        Check that ``expected_actor``'s document delegates to ``key_id``.
+
+        Called when the signature's ``keyId`` resolves to a different
+        actor than the one the activity claims — legitimate when the actor
+        advertises that key itself (e.g. an instance-level signing key).
+        Raises :class:`SignatureVerificationError` when the claimed
+        actor's document cannot be fetched or lists no ``publicKey`` entry
+        whose ``id`` matches ``key_id``.
+        """
+        actor_data = self._fetch_actor(expected_actor)
+        if actor_data is None:
+            raise SignatureVerificationError(
+                f"Cannot fetch expected actor for key ownership check: "
+                f"{expected_actor}"
+            )
+
+        pk = actor_data.get("publicKey")
+        keys = pk if isinstance(pk, list) else [pk]
+        if any(isinstance(key, dict) and key.get("id") == key_id for key in keys):
+            return
+
+        raise SignatureVerificationError(
+            f"Signature key {key_id} is not owned by activity actor "
+            f"{expected_actor}"
+        )
 
     def process(
         self,
@@ -232,10 +273,15 @@ class InboxProcessor:
         :param method: HTTP method of the incoming request.
         :param path: Request path of the incoming request.
         :param headers: Request headers (for signature verification).
+            Required unless ``skip_verification`` is set — the HTTP
+            signature is what authenticates ``activity.actor``.
         :param body: Raw request body (for signature verification).
         :param skip_verification: Skip HTTP signature verification
             (for testing only).
         :return: Response data or None.
+        :raises SignatureVerificationError: If signature verification is
+            enabled but no request headers were provided, or the verified
+            signer does not match ``activity.actor``.
         """
         # Instance allow/block check — runs before signature verification so
         # rejected instances are dropped without fetching the actor's key.
@@ -256,8 +302,17 @@ class InboxProcessor:
             )
             return None
 
-        if not skip_verification and headers:
-            self.verify_signature(method, path, headers, body)
+        if not skip_verification:
+            if not headers:
+                raise SignatureVerificationError(
+                    "Cannot verify signature: no request headers provided. "
+                    "Pass skip_verification=True to process unauthenticated "
+                    "activities."
+                )
+            expected_actor = actor_value if isinstance(actor_value, str) else None
+            self.verify_signature(
+                method, path, headers, body, expected_actor=expected_actor
+            )
 
         if not isinstance(activity_data, dict):
             raise ActivityPubError("Invalid activity: expected object, got array")

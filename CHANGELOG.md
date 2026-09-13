@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- HTTP signature verification now binds the verified signer to the
+  activity: when the signature's `keyId` resolves to a different actor
+  than `activity.actor`, the claimed actor's document must advertise the
+  signing key (`publicKey.id == keyId`; `publicKey` may be a list).
+  Previously a valid signature from any actor could attribute activities
+  — including `Delete`s that retract follows and interactions — to
+  another actor.
+
+### Changed
+
+- `InboxProcessor.process` (and
+  `ActivityPubHandler.process_inbox_activity`) now raise
+  `SignatureVerificationError` when
+  called without request headers and `skip_verification` is unset —
+  previously the signature check was silently skipped, processing
+  unauthenticated activities as verified. Pass
+  `skip_verification=True` to process activities outside an HTTP
+  context.
+- `verify_signature` accepts an optional `expected_actor` parameter for
+  the signer-binding check.
+
 ## 0.3.5
 
 ### Added

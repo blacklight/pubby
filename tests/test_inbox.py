@@ -2,13 +2,17 @@
 Tests for inbox processing — Follow, Undo, Create, Like, Announce, Delete.
 """
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from pubby._exceptions import SignatureVerificationError
 from pubby._model import (
     InteractionType,
 )
+from pubby.crypto import sign_request
+from pubby.crypto._keys import export_public_key_pem, generate_rsa_keypair
 from pubby.handlers._inbox import InboxProcessor
 
 
@@ -1742,3 +1746,254 @@ class TestStrictAttribution:
             private_key=private_key,
         )
         assert handler.inbox.strict_attribution is False
+
+
+class TestSignatureVerification:
+    """
+    HTTP signature handling in ``process``: verification is required by
+    default, and the verified key owner must be the activity's actor (or a
+    key that actor's document advertises).
+    """
+
+    ACTOR = "https://remote.example.com/users/alice"
+    MALLORY = "https://evil.example.com/users/mallory"
+    INSTANCE = "https://remote.example.com/ap/actor"
+    INBOX_URL = "https://blog.example.com/ap/inbox"
+    INBOX_PATH = "/ap/inbox"
+
+    @staticmethod
+    def _actor_doc(actor_id, pem, key_id=None):
+        return {
+            "id": actor_id,
+            "type": "Person",
+            "preferredUsername": actor_id.rstrip("/").rsplit("/", 1)[-1],
+            "inbox": f"{actor_id}/inbox",
+            "publicKey": {
+                "id": key_id or f"{actor_id}#main-key",
+                "owner": actor_id,
+                "publicKeyPem": pem,
+            },
+        }
+
+    @staticmethod
+    def _like(actor):
+        return {
+            "id": f"{actor}/activities/like-1",
+            "type": "Like",
+            "actor": actor,
+            "object": "https://blog.example.com/post/1",
+        }
+
+    def _signed(self, private_key, key_id, activity):
+        """Produce real signature headers + body for a POST to the inbox."""
+        body = json.dumps(activity).encode()
+        headers = sign_request(
+            private_key,
+            key_id,
+            method="POST",
+            url=self.INBOX_URL,
+            body=body,
+        )
+        return headers, body
+
+    @staticmethod
+    def _patch_fetch(processor, docs):
+        return patch.object(
+            processor, "_fetch_actor", side_effect=lambda url: docs.get(url)
+        )
+
+    def test_missing_headers_rejected(self, inbox_processor):
+        """No headers means nothing verifiable — fail closed by default."""
+        activity = self._like(self.ACTOR)
+        with pytest.raises(SignatureVerificationError, match="no request headers"):
+            inbox_processor.process(activity)
+
+    def test_empty_headers_rejected(self, inbox_processor):
+        with pytest.raises(SignatureVerificationError):
+            inbox_processor.process(self._like(self.ACTOR), headers={})
+
+    def test_skip_verification_allows_missing_headers(
+        self, inbox_processor, mock_storage
+    ):
+        """The explicit opt-out still processes unauthenticated input."""
+        inbox_processor.process(self._like(self.ACTOR), skip_verification=True)
+        mock_storage.store_interaction.assert_called_once()
+
+    def test_valid_signature_accepted(self, inbox_processor, mock_storage, rsa_keypair):
+        """A signature whose keyId resolves to activity.actor is accepted."""
+        private_key, public_key = rsa_keypair
+        doc = self._actor_doc(self.ACTOR, export_public_key_pem(public_key))
+        activity = self._like(self.ACTOR)
+        headers, body = self._signed(private_key, f"{self.ACTOR}#main-key", activity)
+
+        with self._patch_fetch(inbox_processor, {self.ACTOR: doc}):
+            inbox_processor.process(
+                activity,
+                path=self.INBOX_PATH,
+                headers=headers,
+                body=body,
+            )
+
+        mock_storage.store_interaction.assert_called_once()
+        interaction = mock_storage.store_interaction.call_args[0][0]
+        assert interaction.source_actor_id == self.ACTOR
+
+    def test_signer_actor_mismatch_rejected(
+        self, inbox_processor, mock_storage, rsa_keypair
+    ):
+        """A valid signature from mallory cannot attribute a Like to alice."""
+        private_key, public_key = rsa_keypair
+        victim_private, victim_public = generate_rsa_keypair()
+        docs = {
+            self.MALLORY: self._actor_doc(
+                self.MALLORY, export_public_key_pem(public_key)
+            ),
+            self.ACTOR: self._actor_doc(
+                self.ACTOR, export_public_key_pem(victim_public)
+            ),
+        }
+        activity = self._like(self.ACTOR)
+        headers, body = self._signed(private_key, f"{self.MALLORY}#main-key", activity)
+
+        with self._patch_fetch(inbox_processor, docs):
+            with pytest.raises(SignatureVerificationError, match="not owned by"):
+                inbox_processor.process(
+                    activity,
+                    path=self.INBOX_PATH,
+                    headers=headers,
+                    body=body,
+                )
+
+        mock_storage.store_interaction.assert_not_called()
+
+    def test_forged_actor_delete_rejected(
+        self, inbox_processor, mock_storage, rsa_keypair
+    ):
+        """Regression: a Delete claiming another actor cannot wipe follows."""
+        private_key, public_key = rsa_keypair
+        victim_private, victim_public = generate_rsa_keypair()
+        docs = {
+            self.MALLORY: self._actor_doc(
+                self.MALLORY, export_public_key_pem(public_key)
+            ),
+            self.ACTOR: self._actor_doc(
+                self.ACTOR, export_public_key_pem(victim_public)
+            ),
+        }
+        activity = {
+            "id": f"{self.MALLORY}/activities/delete-1",
+            "type": "Delete",
+            "actor": self.ACTOR,
+            "object": {"id": self.ACTOR, "type": "Person"},
+        }
+        headers, body = self._signed(private_key, f"{self.MALLORY}#main-key", activity)
+
+        with self._patch_fetch(inbox_processor, docs):
+            with pytest.raises(SignatureVerificationError):
+                inbox_processor.process(
+                    activity,
+                    path=self.INBOX_PATH,
+                    headers=headers,
+                    body=body,
+                )
+
+        mock_storage.remove_follower.assert_not_called()
+        mock_storage.delete_interaction_by_object_id.assert_not_called()
+
+    def test_delegated_key_accepted(self, inbox_processor, mock_storage, rsa_keypair):
+        """An actor whose document advertises the signing key is accepted."""
+        private_key, public_key = rsa_keypair
+        key_id = f"{self.INSTANCE}#main-key"
+        docs = {
+            self.INSTANCE: self._actor_doc(
+                self.INSTANCE, export_public_key_pem(public_key), key_id
+            ),
+            self.ACTOR: self._actor_doc(self.ACTOR, "unused", key_id),
+        }
+        activity = self._like(self.ACTOR)
+        headers, body = self._signed(private_key, key_id, activity)
+
+        with self._patch_fetch(inbox_processor, docs):
+            inbox_processor.process(
+                activity,
+                path=self.INBOX_PATH,
+                headers=headers,
+                body=body,
+            )
+
+        mock_storage.store_interaction.assert_called_once()
+        interaction = mock_storage.store_interaction.call_args[0][0]
+        assert interaction.source_actor_id == self.ACTOR
+
+    def test_delegated_key_in_publickey_list(
+        self, inbox_processor, mock_storage, rsa_keypair
+    ):
+        """``publicKey`` may be a list; any entry may match the keyId."""
+        private_key, public_key = rsa_keypair
+        key_id = f"{self.INSTANCE}#main-key"
+        actor_doc = self._actor_doc(self.ACTOR, "unused", key_id)
+        actor_doc["publicKey"] = [
+            {"id": f"{self.ACTOR}#other-key", "publicKeyPem": "unused"},
+            actor_doc["publicKey"],
+        ]
+        docs = {
+            self.INSTANCE: self._actor_doc(
+                self.INSTANCE, export_public_key_pem(public_key), key_id
+            ),
+            self.ACTOR: actor_doc,
+        }
+        activity = self._like(self.ACTOR)
+        headers, body = self._signed(private_key, key_id, activity)
+
+        with self._patch_fetch(inbox_processor, docs):
+            inbox_processor.process(
+                activity,
+                path=self.INBOX_PATH,
+                headers=headers,
+                body=body,
+            )
+
+        mock_storage.store_interaction.assert_called_once()
+
+    def test_delegated_key_unfetchable_actor_rejected(
+        self, inbox_processor, mock_storage, rsa_keypair
+    ):
+        """A claimed actor whose document cannot be fetched is rejected."""
+        private_key, public_key = rsa_keypair
+        key_id = f"{self.INSTANCE}#main-key"
+        docs = {
+            self.INSTANCE: self._actor_doc(
+                self.INSTANCE, export_public_key_pem(public_key), key_id
+            ),
+        }
+        activity = self._like(self.ACTOR)
+        headers, body = self._signed(private_key, key_id, activity)
+
+        with self._patch_fetch(inbox_processor, docs):
+            with pytest.raises(SignatureVerificationError, match="Cannot fetch"):
+                inbox_processor.process(
+                    activity,
+                    path=self.INBOX_PATH,
+                    headers=headers,
+                    body=body,
+                )
+
+        mock_storage.store_interaction.assert_not_called()
+
+    def test_verify_signature_returns_key_owner(self, inbox_processor, rsa_keypair):
+        """verify_signature returns the keyId owner when it is the actor."""
+        private_key, public_key = rsa_keypair
+        doc = self._actor_doc(self.ACTOR, export_public_key_pem(public_key))
+        activity = self._like(self.ACTOR)
+        headers, body = self._signed(private_key, f"{self.ACTOR}#main-key", activity)
+
+        with self._patch_fetch(inbox_processor, {self.ACTOR: doc}):
+            actor_url = inbox_processor.verify_signature(
+                "POST",
+                self.INBOX_PATH,
+                headers,
+                body,
+                expected_actor=self.ACTOR,
+            )
+
+        assert actor_url == self.ACTOR

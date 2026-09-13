@@ -45,6 +45,7 @@
 - [Interaction Callbacks](#interaction-callbacks)
   - [Private Messages](#private-messages)
 - [Strict Attribution](#strict-attribution)
+- [Signature Verification](#signature-verification)
 - [API](#api)
   - [Data Model](#data-model)
     - [`ActorConfig`](#actorconfig)
@@ -918,6 +919,33 @@ account-migration deployments can legitimately deliver objects whose id is
 hosted on a different host than the actor. The same validation is available
 standalone as `pubby.validate_attribution(actor, obj)`, which raises
 `pubby.AttributionMismatch` on failure.
+
+## Signature Verification
+
+Inbound HTTP signatures do two things: prove the request was signed by the
+key identified in the signature's `keyId`, and bind that signer to the
+activity's `actor`. When the `keyId` resolves to a different actor than
+`activity.actor` — e.g. an instance-level signing key — the claimed actor's
+document must advertise the key (`publicKey.id` equal to the `keyId`;
+`publicKey` may be a list), otherwise the delivery is rejected with
+`SignatureVerificationError` (HTTP 401 on the bundled routes).
+
+Verification is **required by default**: calling `process_inbox_activity`
+(or `InboxProcessor.process`) without request headers raises
+`SignatureVerificationError` rather than silently skipping the check. Pass
+`skip_verification=True` when processing activities outside an HTTP
+context (tests, replayed queues) — the opt-out must be explicit.
+
+**Relays.** Relays that wrap inbound activities in a relay-authored
+`Announce` (the LitePub/FEP-1b12 style, used by most relay software) work
+unchanged — the relay signs its own `Announce`, and the announced object
+is dereferenced from its origin. Relays that instead *forward* the
+original activity body signed with the relay's key are rejected: the
+HTTP signer does not match `activity.actor`. Mastodon accepts such
+forwarded payloads only when they carry a verifiable Linked Data
+signature (`RsaSignature2017`) by the claimed actor; pubby does not
+verify LD signatures, so forwarded content without an `Announce`
+wrapper is not supported.
 
 ## API
 
