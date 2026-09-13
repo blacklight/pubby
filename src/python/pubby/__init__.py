@@ -49,7 +49,7 @@ from .moderation import extract_domain, is_domain_blocked, normalize_domain
 from .storage import ActivityPubStorage
 from .webfinger import Mention, extract_mentions, resolve_actor_url
 
-__version__ = "0.3.4"
+__version__ = "0.3.5"
 
 __all__ = [
     "Activity",
