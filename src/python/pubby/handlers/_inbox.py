@@ -13,7 +13,6 @@ from .._model import (
     Activity,
     ActivityType,
     Actor,
-    AS_PUBLIC,
     Follower,
     Interaction,
     InteractionStatus,
@@ -21,7 +20,13 @@ from .._model import (
     Object,
     AP_CONTEXT,
 )
-from .._exceptions import ActivityPubError, SignatureVerificationError
+from .._exceptions import (
+    ActivityPubError,
+    AttributionMismatch,
+    SignatureVerificationError,
+)
+from ..attribution import validate as _validate_attribution
+from ..audience import is_public, mentioned_actors
 from ..crypto import sign_request, verify_request
 from ..crypto._keys import load_public_key
 from ..moderation import extract_domain, is_domain_blocked
@@ -57,6 +62,13 @@ class InboxProcessor:
     :param blocked_instances: Optional block-list of remote instance domains.
         Activities from actors on these domains are dropped before signature
         verification.
+    :param strict_attribution: If ``True``, ``Create`` and ``Update``
+        objects are validated via :func:`pubby.attribution.validate` before
+        any callback or storage: a non-empty ``attributedTo`` must name the
+        delivering actor and the object ``id`` must share its authority.
+        Mismatched objects are logged and dropped. Defaults to ``False`` —
+        deployments behind relays or account migration may legitimately
+        receive cross-host objects.
     """
 
     def __init__(
@@ -74,6 +86,7 @@ class InboxProcessor:
         local_base_urls: list[str] | None = None,
         allowed_instances: Collection[str] | None = None,
         blocked_instances: Collection[str] | None = None,
+        strict_attribution: bool = False,
     ):
         self.storage = storage
         self.actor_id = actor_id
@@ -87,6 +100,7 @@ class InboxProcessor:
         self.local_base_urls = local_base_urls or []
         self.allowed_instances = allowed_instances
         self.blocked_instances = blocked_instances
+        self.strict_attribution = strict_attribution
 
     def _is_local_target(self, target_resource: str) -> bool:
         """Check if target_resource is considered local."""
@@ -425,35 +439,30 @@ class InboxProcessor:
         Returns ``True`` if the ActivityStreams Public collection
         (``https://www.w3.org/ns/activitystreams#Public``) or one of its
         common aliases (``Public``, ``as:Public``) appears in the
-        object's ``to`` or ``cc`` fields.
+        object's ``to``, ``cc``, ``bto`` or ``bcc`` fields. Delegates to
+        :func:`pubby.audience.is_public`.
         """
-        public_ids = {AS_PUBLIC, "Public", "as:Public"}
-        to = obj_data.get("to", [])
-        cc = obj_data.get("cc", [])
-        if isinstance(to, str):
-            to = [to]
-        if isinstance(cc, str):
-            cc = [cc]
-        return bool(public_ids.intersection(to + cc))
+        return is_public(obj_data)
 
     @staticmethod
     def _extract_mentioned_actors(obj_data: dict) -> list[str]:
         """Extract actor URLs from Mention tags in the object data."""
-        mentioned = []
-        tags = obj_data.get("tag", [])
-        if isinstance(tags, list):
-            for tag in tags:
-                if isinstance(tag, dict) and tag.get("type") == "Mention":
-                    href = tag.get("href")
-                    if isinstance(href, str) and href:
-                        mentioned.append(href)
-        return mentioned
+        return mentioned_actors(obj_data)
 
     def _handle_create(self, activity: Activity, _: dict) -> dict | None:
         """Handle an incoming Create activity (reply/comment, quote, or mention)."""
         obj_data = activity.object
         if not isinstance(obj_data, dict):
             return None
+
+        if self.strict_attribution:
+            try:
+                _validate_attribution(activity.actor, obj_data)
+            except AttributionMismatch as exc:
+                logger.warning(
+                    "Dropping Create from %s: %s", activity.actor, exc.message
+                )
+                return None
 
         obj = Object.build(obj_data)
         quote_target = self._extract_quote_target(obj_data)
@@ -660,6 +669,21 @@ class InboxProcessor:
         else:
             return None
 
+        if target == activity.actor:
+            # The remote actor deleted its own actor document — it can no
+            # longer follow this local actor, so drop the follow record.
+            # `activity.actor` is the authenticated (signature-verified)
+            # sender, so this ID equality is the authorization boundary:
+            # a delivery can only retract the sender's own follow.
+            # The scope is (remote_actor, local_actor): which actors the
+            # remote followed on other deployments is unknown here.
+            self.storage.remove_follower(activity.actor, self.actor_id)
+            logger.info(
+                "Removed follower %s for actor %s (actor deleted)",
+                activity.actor,
+                self.actor_id,
+            )
+
         # Try to delete by object_id first (the common case: we know the
         # deleted object's URL but not which article it targeted).
         found = self.storage.delete_interaction_by_object_id(activity.actor, target)
@@ -677,6 +701,15 @@ class InboxProcessor:
         obj_data = activity.object
         if not isinstance(obj_data, dict):
             return None
+
+        if self.strict_attribution:
+            try:
+                _validate_attribution(activity.actor, obj_data)
+            except AttributionMismatch as exc:
+                logger.warning(
+                    "Dropping Update from %s: %s", activity.actor, exc.message
+                )
+                return None
 
         obj = Object.build(obj_data)
         target = obj.in_reply_to

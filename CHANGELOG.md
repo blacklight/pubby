@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- New `pubby.audience` module with `PUBLIC_URIS`, `addressees`,
+  `is_public`, and `mentioned_actors` — pure, reusable parsers for
+  ActivityPub audience fields (`to`/`cc`/`bto`/`bcc`) and `Mention` tags.
+  Re-exported from the top-level package; `InboxProcessor`'s internal
+  audience checks now delegate to it.
+- New `pubby.attribution` module with `validate(actor, obj)` and the
+  `AttributionMismatch` exception: rejects inbound objects whose
+  `attributedTo` does not name the delivering actor or whose `id` is
+  hosted on a different authority.
+- New opt-in `strict_attribution` parameter on `ActivityPubHandler` and
+  `InboxProcessor` (default `False`): inbound `Create`/`Update` objects
+  failing `pubby.attribution.validate` are logged and dropped before the
+  interaction callback or storage.
+
+### Fixed
+
+- A `Delete` activity targeting the sender's own actor document now also
+  removes the `(remote_actor, local_actor)` follower record — a deleted
+  actor can no longer be a follower. Interaction cleanup still runs.
+- The public-addressing check now also inspects `bto`/`bcc`, matching the
+  audience fields `addressees` reads.
+
 ## 0.3.4
 
 ### Fixed

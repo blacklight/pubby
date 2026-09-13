@@ -1,5 +1,6 @@
 from ._exceptions import (
     ActivityPubError,
+    AttributionMismatch,
     DeliveryError,
     RateLimitError,
     SignatureVerificationError,
@@ -18,6 +19,8 @@ from ._model import (
     ObjectType,
 )
 from ._rate_limit import RateLimiter
+from .attribution import validate as validate_attribution
+from .audience import PUBLIC_URIS, addressees, is_public, mentioned_actors
 from .client import extract_actor_inbox, resolve_actor_inbox
 from .content import (
     RenderedContent,
@@ -56,6 +59,8 @@ __all__ = [
     "ActivityType",
     "Actor",
     "ActorConfig",
+    "addressees",
+    "AttributionMismatch",
     "build_announce_activity",
     "build_delete_activity",
     "build_hashtag_tags",
@@ -77,11 +82,14 @@ __all__ = [
     "InteractionType",
     "is_domain_blocked",
     "is_linkable_url",
+    "is_public",
     "Mention",
+    "mentioned_actors",
     "normalize_domain",
     "Object",
     "ObjectType",
     "property_value_attachment",
+    "PUBLIC_URIS",
     "RateLimiter",
     "RateLimitError",
     "render_bio_html",
@@ -93,4 +101,5 @@ __all__ = [
     "resolve_actor_url",
     "set_object_content",
     "SignatureVerificationError",
+    "validate_attribution",
 ]

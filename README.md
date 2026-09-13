@@ -44,6 +44,7 @@
 - [Rate Limiting](#rate-limiting)
 - [Interaction Callbacks](#interaction-callbacks)
   - [Private Messages](#private-messages)
+- [Strict Attribution](#strict-attribution)
 - [API](#api)
   - [Data Model](#data-model)
     - [`ActorConfig`](#actorconfig)
@@ -59,6 +60,7 @@
   - [Actor / Inbox Resolution](#actor--inbox-resolution)
     - [`resolve_actor_inbox(actor_url, storage, *, private_key=None, key_id=None, allowed_instances=None, blocked_instances=None, user_agent=None, timeout=10.0) -> str | None`](#resolve_actor_inboxactor_url-storage--private_keynone-key_idnone-allowed_instancesnone-blocked_instancesnone-user_agentnone-timeout100---str--none)
     - [`extract_actor_inbox(actor_data) -> str | None`](#extract_actor_inboxactor_data---str--none)
+  - [Audience Helpers — `pubby.audience`](#audience-helpers--pubbyaudience)
   - [Publishing](#publishing)
     - [`handler.publish_object(obj, activity_type="Create")`](#handlerpublish_objectobj-activity_typecreate)
     - [`handler.publish_activity(activity)`](#handlerpublish_activityactivity)
@@ -685,6 +687,7 @@ always pass `target_actor_id` for precise removal.
 | `allowed_instances` | `Collection[str]` | `None` | Only federate with these instance domains (allow-list) |
 | `blocked_instances` | `Collection[str]` | `None` | Never federate with these instance domains (block-list) |
 | `deliver` | `Callable[[str, dict], None]` | `None` | Custom delivery callable invoked per inbox (see Custom Delivery) |
+| `strict_attribution` | `bool` | `False` | Reject inbound `Create`/`Update` objects whose `attributedTo` or `id` authority does not match the delivering actor (see Strict Attribution) |
 
 ### `actor_config`
 
@@ -877,7 +880,8 @@ handler = ActivityPubHandler(
 ### Private Messages
 
 Only **publicly addressed** interactions (those with
-`https://www.w3.org/ns/activitystreams#Public` in `to` or `cc`) are persisted
+`https://www.w3.org/ns/activitystreams#Public` — or the `Public`/`as:Public`
+aliases — in `to`, `cc`, `bto`, or `bcc`) are persisted
 to storage. This includes both public and unlisted posts. Private/direct
 messages and followers-only posts are **not stored**, preventing them from
 appearing in public contexts like blog comments.
@@ -886,6 +890,34 @@ However, the `on_interaction_received` callback is still invoked for **all**
 interactions, including private ones. This allows applications to send
 notifications (e.g., email alerts) for direct messages without exposing them
 publicly.
+
+## Strict Attribution
+
+HTTP signatures prove *who delivered* an activity — not that the delivered
+object was authored by that actor. Without a sanity check, a signed actor on
+one host can publish an object claiming a foreign `id` or `attributedTo`,
+letting your server index or re-federate a forgery.
+
+Set `strict_attribution=True` on `ActivityPubHandler` to reject inbound
+`Create` and `Update` objects where a non-empty `attributedTo` does not name
+the delivering actor, or where the object `id` is hosted on a different
+authority. Mismatched objects are logged and dropped before the interaction
+callback or storage — they never surface as an HTTP error.
+
+```python
+handler = ActivityPubHandler(
+    storage=storage,
+    actor_config={...},
+    private_key=private_key,
+    strict_attribution=True,
+)
+```
+
+The check is opt-in (default `False`) because relays, reverse proxies, and
+account-migration deployments can legitimately deliver objects whose id is
+hosted on a different host than the actor. The same validation is available
+standalone as `pubby.validate_attribution(actor, obj)`, which raises
+`pubby.AttributionMismatch` on failure.
 
 ## API
 
@@ -1179,6 +1211,37 @@ from pubby.client import extract_actor_inbox
 
 inbox = extract_actor_inbox(actor_data)
 ```
+
+### Audience Helpers — `pubby.audience`
+
+Pure parsers for ActivityPub addressing fields, shared by the inbox processor
+and available to applications that need the same interpretation:
+
+```python
+from pubby import PUBLIC_URIS, addressees, is_public, mentioned_actors
+
+addressees({"to": "https://a.example/u", "cc": ["https://b.example/u"]})
+# {"https://a.example/u", "https://b.example/u"}
+
+is_public({"cc": ["https://www.w3.org/ns/activitystreams#Public"]})  # True
+
+mentioned_actors({"tag": [{"type": "Mention", "href": "https://a.example/u"}]})
+# ["https://a.example/u"]
+```
+
+- `PUBLIC_URIS` — the recognized public-audience identifiers: the canonical
+  `https://www.w3.org/ns/activitystreams#Public` plus the `Public` and
+  `as:Public` aliases. It is an immutable `frozenset` — do not mutate it;
+  matching is exact string equality.
+- `addressees(obj_or_activity)` — union of string values in `to`, `cc`,
+  `bto`, and `bcc`, returned as an unordered `set`. Only the supplied mapping
+  is inspected — it never descends into an activity's embedded `object`.
+  Missing or malformed fields are ignored.
+- `is_public(obj_or_activity)` — `True` when any `PUBLIC_URIS` member appears
+  in the mapping's audience fields.
+- `mentioned_actors(obj_data)` — actor URLs from `Mention` tags, in
+  first-seen order with duplicates removed; malformed and non-`Mention`
+  entries are skipped.
 
 ### Publishing
 

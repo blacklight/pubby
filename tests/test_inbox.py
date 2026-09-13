@@ -903,6 +903,74 @@ class TestHandleDelete:
         mock_storage.delete_interaction_by_object_id.assert_called_once_with(
             actor_id, object_id
         )
+        mock_storage.remove_follower.assert_not_called()
+
+    def test_delete_actor_string_removes_follower(self, inbox_processor, mock_storage):
+        actor_id = "https://remote.example.com/users/alice"
+        activity = {
+            "id": f"{actor_id}/activities/delete-self",
+            "type": "Delete",
+            "actor": actor_id,
+            "object": actor_id,  # the actor document itself
+        }
+
+        inbox_processor.process(activity, skip_verification=True)
+        mock_storage.remove_follower.assert_called_once_with(
+            actor_id, "https://blog.example.com/ap/actor"
+        )
+
+    @pytest.mark.parametrize("obj_type", ["Person", "Tombstone"])
+    def test_delete_actor_dict_removes_follower(
+        self, inbox_processor, mock_storage, obj_type
+    ):
+        actor_id = "https://remote.example.com/users/alice"
+        activity = {
+            "id": f"{actor_id}/activities/delete-self",
+            "type": "Delete",
+            "actor": actor_id,
+            "object": {"id": actor_id, "type": obj_type},
+        }
+
+        inbox_processor.process(activity, skip_verification=True)
+        mock_storage.remove_follower.assert_called_once_with(
+            actor_id, "https://blog.example.com/ap/actor"
+        )
+
+    def test_delete_actor_also_removes_interactions(
+        self, inbox_processor, mock_storage
+    ):
+        actor_id = "https://remote.example.com/users/alice"
+        activity = {
+            "id": f"{actor_id}/activities/delete-self",
+            "type": "Delete",
+            "actor": actor_id,
+            "object": {"id": actor_id, "type": "Tombstone"},
+        }
+
+        mock_storage.delete_interaction_by_object_id.return_value = True
+        inbox_processor.process(activity, skip_verification=True)
+        mock_storage.remove_follower.assert_called_once_with(
+            actor_id, "https://blog.example.com/ap/actor"
+        )
+        mock_storage.delete_interaction_by_object_id.assert_called_once_with(
+            actor_id, actor_id
+        )
+
+    def test_delete_unrelated_actor_typed_object_keeps_follower(
+        self, inbox_processor, mock_storage
+    ):
+        """A Delete of another actor's document must not remove the sender's follow."""
+        actor_id = "https://remote.example.com/users/alice"
+        other_actor = "https://remote.example.com/users/bob"
+        activity = {
+            "id": f"{actor_id}/activities/delete-3",
+            "type": "Delete",
+            "actor": actor_id,
+            "object": {"id": other_actor, "type": "Person"},
+        }
+
+        inbox_processor.process(activity, skip_verification=True)
+        mock_storage.remove_follower.assert_not_called()
 
 
 class TestHandleUpdate:
@@ -1455,3 +1523,222 @@ class TestMentionExtraction:
             "https://blog.example.com/ap/actor",
             "https://other.example.com/users/bob",
         ]
+
+
+class TestStrictAttribution:
+    """Tests for the opt-in strict_attribution inbox policy."""
+
+    @pytest.fixture
+    def strict_processor(self, mock_storage, private_key):
+        callback = MagicMock()
+        processor = InboxProcessor(
+            storage=mock_storage,
+            actor_id="https://blog.example.com/ap/actor",
+            private_key=private_key,
+            key_id="https://blog.example.com/ap/actor#main-key",
+            strict_attribution=True,
+            on_interaction_received=callback,
+        )
+        processor.callback = callback
+        return processor
+
+    @staticmethod
+    def _mock_actor_fetch(mock_requests, actor_id):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = _remote_actor_data(actor_id)
+        mock_resp.raise_for_status = MagicMock()
+        mock_requests.get.return_value = mock_resp
+
+    @staticmethod
+    def _create_activity(actor_id, obj):
+        return {
+            "id": f"{actor_id}/activities/create-strict",
+            "type": "Create",
+            "actor": actor_id,
+            "object": obj,
+        }
+
+    @patch("pubby.handlers._inbox.requests")
+    def test_default_processor_accepts_mismatch(
+        self, mock_requests, inbox_processor, mock_storage
+    ):
+        """Without strict_attribution, mismatched objects flow as before."""
+        actor_id = "https://remote.example.com/users/alice"
+        self._mock_actor_fetch(mock_requests, actor_id)
+
+        activity = self._create_activity(
+            actor_id,
+            {
+                "id": "https://victim.example.com/notes/1",
+                "type": "Note",
+                "content": "Forged",
+                "attributedTo": "https://victim.example.com/users/bob",
+                "inReplyTo": "https://blog.example.com/posts/1",
+                "to": ["https://www.w3.org/ns/activitystreams#Public"],
+            },
+        )
+
+        inbox_processor.process(activity, skip_verification=True)
+        mock_storage.store_interaction.assert_called_once()
+
+    @patch("pubby.handlers._inbox.requests")
+    def test_strict_create_rejects_attribution_mismatch(
+        self, mock_requests, strict_processor, mock_storage, caplog
+    ):
+        actor_id = "https://remote.example.com/users/alice"
+        self._mock_actor_fetch(mock_requests, actor_id)
+
+        activity = self._create_activity(
+            actor_id,
+            {
+                "id": f"{actor_id}/notes/1",
+                "type": "Note",
+                "content": "Forged",
+                "attributedTo": "https://other.example.com/users/mallory",
+                "inReplyTo": "https://blog.example.com/posts/1",
+                "to": ["https://www.w3.org/ns/activitystreams#Public"],
+            },
+        )
+
+        with caplog.at_level("WARNING"):
+            result = strict_processor.process(activity, skip_verification=True)
+
+        assert result is None
+        mock_storage.store_interaction.assert_not_called()
+        strict_processor.callback.assert_not_called()
+        assert any("Dropping Create" in record.message for record in caplog.records)
+
+    @patch("pubby.handlers._inbox.requests")
+    def test_strict_create_rejects_foreign_host(
+        self, mock_requests, strict_processor, mock_storage
+    ):
+        actor_id = "https://remote.example.com/users/alice"
+        self._mock_actor_fetch(mock_requests, actor_id)
+
+        activity = self._create_activity(
+            actor_id,
+            {
+                "id": "https://victim.example.com/notes/1",
+                "type": "Note",
+                "content": "Forged",
+                "inReplyTo": "https://blog.example.com/posts/1",
+                "to": ["https://www.w3.org/ns/activitystreams#Public"],
+            },
+        )
+
+        strict_processor.process(activity, skip_verification=True)
+        mock_storage.store_interaction.assert_not_called()
+        strict_processor.callback.assert_not_called()
+
+    @patch("pubby.handlers._inbox.requests")
+    def test_strict_create_accepts_matching_object(
+        self, mock_requests, strict_processor, mock_storage
+    ):
+        actor_id = "https://remote.example.com/users/alice"
+        self._mock_actor_fetch(mock_requests, actor_id)
+
+        activity = self._create_activity(
+            actor_id,
+            {
+                "id": f"{actor_id}/notes/1",
+                "type": "Note",
+                "content": "Legit",
+                "attributedTo": actor_id,
+                "inReplyTo": "https://blog.example.com/posts/1",
+                "to": ["https://www.w3.org/ns/activitystreams#Public"],
+            },
+        )
+
+        strict_processor.process(activity, skip_verification=True)
+        strict_processor.callback.assert_called_once()
+        mock_storage.store_interaction.assert_called_once()
+
+    @patch("pubby.handlers._inbox.requests")
+    def test_strict_update_rejects_mismatch(
+        self, mock_requests, strict_processor, mock_storage, caplog
+    ):
+        actor_id = "https://remote.example.com/users/alice"
+        self._mock_actor_fetch(mock_requests, actor_id)
+
+        activity = {
+            "id": f"{actor_id}/activities/update-strict",
+            "type": "Update",
+            "actor": actor_id,
+            "object": {
+                "id": "https://victim.example.com/notes/1",
+                "type": "Note",
+                "content": "Forged edit",
+                "inReplyTo": "https://blog.example.com/posts/1",
+            },
+        }
+
+        with caplog.at_level("WARNING"):
+            result = strict_processor.process(activity, skip_verification=True)
+
+        assert result is None
+        mock_storage.store_interaction.assert_not_called()
+        assert any("Dropping Update" in record.message for record in caplog.records)
+
+    @patch("pubby.handlers._inbox.requests")
+    def test_strict_update_accepts_matching_object(
+        self, mock_requests, strict_processor, mock_storage
+    ):
+        actor_id = "https://remote.example.com/users/alice"
+        self._mock_actor_fetch(mock_requests, actor_id)
+
+        activity = {
+            "id": f"{actor_id}/activities/update-strict",
+            "type": "Update",
+            "actor": actor_id,
+            "object": {
+                "id": f"{actor_id}/notes/1",
+                "type": "Note",
+                "content": "Legit edit",
+                "inReplyTo": "https://blog.example.com/posts/1",
+            },
+        }
+
+        strict_processor.process(activity, skip_verification=True)
+        mock_storage.store_interaction.assert_called_once()
+
+    def test_strict_bare_string_object_passes(self, strict_processor, mock_storage):
+        """Bare-string objects have no comparable fields; they are not dropped."""
+        actor_id = "https://remote.example.com/users/alice"
+        activity = {
+            "id": f"{actor_id}/activities/create-str",
+            "type": "Create",
+            "actor": actor_id,
+            "object": "https://victim.example.com/notes/1",
+        }
+
+        result = strict_processor.process(activity, skip_verification=True)
+        assert result is None  # ignored as before, not rejected as spoofed
+
+    def test_handler_forwards_strict_attribution(self, private_key):
+        """ActivityPubHandler must forward the flag to its inbox processor."""
+        from pubby.handlers import ActivityPubHandler
+
+        handler = ActivityPubHandler(
+            storage=MagicMock(),
+            actor_config={
+                "base_url": "https://blog.example.com",
+                "username": "blog",
+            },
+            private_key=private_key,
+            strict_attribution=True,
+        )
+        assert handler.inbox.strict_attribution is True
+
+    def test_handler_strict_attribution_defaults_off(self, private_key):
+        from pubby.handlers import ActivityPubHandler
+
+        handler = ActivityPubHandler(
+            storage=MagicMock(),
+            actor_config={
+                "base_url": "https://blog.example.com",
+                "username": "blog",
+            },
+            private_key=private_key,
+        )
+        assert handler.inbox.strict_attribution is False

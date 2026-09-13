@@ -27,6 +27,19 @@ class DeliveryError(ActivityPubError):
         super().__init__(f"Delivery to {inbox_url} failed: {message}")
 
 
+class AttributionMismatch(ActivityPubError):
+    """
+    Raised when an incoming object's attribution cannot be trusted.
+
+    Used by :func:`pubby.attribution.validate` when an object's
+    ``attributedTo`` does not match the delivering actor, or when the
+    object ``id`` is hosted on a different authority than the actor.
+    """
+
+    def __init__(self, message: str = "Object attribution mismatch", **_):
+        super().__init__(message)
+
+
 class RateLimitError(ActivityPubError):
     """
     Raised when a rate limit is exceeded.

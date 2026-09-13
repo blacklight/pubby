@@ -81,6 +81,13 @@ class ActivityPubHandler:
         collection, shared-inbox deduplication, and instance filtering.
         Combine with :func:`pubby.deliver_activity` inside your task to
         perform the signed POST.
+    :param strict_attribution: If ``True``, inbound ``Create``/``Update``
+        objects are validated via :func:`pubby.attribution.validate` before
+        processing: a non-empty ``attributedTo`` must name the delivering
+        actor and the object ``id`` must share its authority. Mismatched
+        objects are logged and dropped. Defaults to ``False`` — deployments
+        behind relays or account migration may legitimately receive
+        cross-host objects.
     """
 
     def __init__(
@@ -105,6 +112,7 @@ class ActivityPubHandler:
         allowed_instances: Collection[str] | None = None,
         blocked_instances: Collection[str] | None = None,
         deliver: Callable[[str, dict], None] | None = None,
+        strict_attribution: bool = False,
     ):
         self.storage = storage
 
@@ -170,6 +178,7 @@ class ActivityPubHandler:
             local_base_urls=local_base_urls,
             allowed_instances=allowed_instances,
             blocked_instances=blocked_instances,
+            strict_attribution=strict_attribution,
         )
 
         self.outbox = OutboxProcessor(

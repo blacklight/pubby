@@ -58,6 +58,8 @@ src/python/pubby/
 ├── _model.py                # Core data model (dataclasses + enums)
 ├── _exceptions.py           # Exception hierarchy
 ├── _rate_limit.py           # In-memory sliding-window rate limiter
+├── audience.py              # Audience/Mention parsing helpers
+├── attribution.py           # Inbound object attribution validation
 ├── moderation.py            # Instance domain allow/block list helpers
 ├── webfinger.py             # WebFinger client (resolve_actor_url, extract_mentions)
 │
@@ -144,6 +146,10 @@ A simple hierarchy rooted at `ActivityPubError`:
 - **`SignatureVerificationError`** — HTTP Signature check failed.
 - **`DeliveryError`** — outbound delivery to a remote inbox failed.
 - **`RateLimitError`** — per-IP rate limit exceeded.
+- **`AttributionMismatch`** — an inbound object's `attributedTo` or `id`
+  authority does not match the delivering actor (raised by
+  `pubby.attribution.validate`; caught and dropped by `InboxProcessor`
+  when `strict_attribution` is enabled).
 
 ### 3. Rate Limiter — `pubby._rate_limit`
 
@@ -171,7 +177,38 @@ matches domains and enforces the policy at two seams:
 | `extract_domain(url_or_actor)` | Hostname of an actor URL, inbox URL, or bare domain |
 | `is_domain_blocked(domain, allowed=None, blocked=None)` | `True` when blocked, or a non-empty allow-list excludes the domain (blocked wins over allowed) |
 
-### 5. Crypto — `pubby.crypto`
+### 5. Audience Helpers — `pubby.audience`
+
+Pure, stdlib-only parsers for ActivityPub addressing, shared by
+`InboxProcessor` and available to applications:
+
+| Function | Purpose |
+|----------|---------|
+| `addressees(obj_or_activity)` | Union of string values in `to`, `cc`, `bto`, `bcc` of the supplied mapping only (unordered `set`) |
+| `is_public(obj_or_activity)` | `True` when any of `PUBLIC_URIS` appears in the mapping's audience fields |
+| `mentioned_actors(obj_data)` | Actor URLs from `Mention` tags, first-seen order, deduplicated |
+
+`PUBLIC_URIS` recognizes the canonical `as:Public` URI plus the `Public`
+and `as:Public` shorthand aliases. The helpers inspect only the mapping
+they are given — they never descend into an activity's embedded
+`object` — and tolerate missing or malformed fields without raising.
+
+### 6. Attribution Validation — `pubby.attribution`
+
+`validate(actor, obj)` sanity-checks that an inbound object can plausibly
+belong to the actor that signed the delivery: a non-empty `attributedTo`
+must name the actor (string, list, or `{"id": ...}` forms), and a present
+object `id` must share the actor's domain (via `extract_domain`).
+Objects lacking comparable fields pass. On failure it raises
+`AttributionMismatch`.
+
+`InboxProcessor` applies this to `Create`/`Update` objects when
+`strict_attribution=True` (default `False`): mismatched objects are
+logged and dropped before any callback or storage mutation. Kept opt-in
+because relays, proxies, and account migration can legitimately separate
+actor and object hosts.
+
+### 7. Crypto — `pubby.crypto`
 
 Two internal modules, re-exported through `pubby.crypto.__init__`:
 
@@ -190,9 +227,9 @@ with RSA-SHA256.  `sign_request()` returns a dict of headers (`Date`,
 `verify_request()` reconstructs the signing string, verifies the RSA
 signature, and optionally checks the `Digest` header.
 
-### 6. Handlers — `pubby.handlers`
+### 8. Handlers — `pubby.handlers`
 
-#### 6.1 `ActivityPubHandler` (façade)
+#### 8.1 `ActivityPubHandler` (façade)
 
 The single entry point consumers interact with.  Accepts an
 `ActivityPubStorage`, an `ActorConfig` (or dict), and a private key.
@@ -221,7 +258,7 @@ Public methods:
 | `render_interaction(interaction)` | Render a single interaction as HTML. |
 | `render_interactions(interactions)` | Render a list of interactions as HTML. |
 
-#### 6.2 `InboxProcessor`
+#### 8.2 `InboxProcessor`
 
 Dispatches incoming activities by type via a handler map:
 
@@ -233,7 +270,9 @@ Undo         → _handle_undo        (unfollow or undo like/boost)
 Create       → _handle_create      (reply, quote, or mention)
 Like         → _handle_like        (store like interaction)
 Announce     → _handle_announce    (store boost interaction)
-Delete       → _handle_delete      (soft-delete interaction)
+Delete       → _handle_delete      (soft-delete interaction; a Delete of the
+                                    sender's own actor document also retracts
+                                    the (remote, local) follow record)
 Update       → _handle_update      (update stored reply)
 QuoteRequest → _handle_quote_request (FEP-044f: auto-approve quotes)
 ```
@@ -242,12 +281,17 @@ Before dispatching, `verify_signature()` checks the HTTP Signature header
 by fetching the sender's public key (with actor caching).  When
 `allowed_instances`/`blocked_instances` are configured, the activity's
 `actor` domain is checked first and rejected instances are dropped without
-any network call (see `pubby.moderation`).
+any network call (see `pubby.moderation`).  When `strict_attribution` is
+enabled, `Create`/`Update` objects are additionally validated by
+`pubby.attribution.validate` before any callback or storage (see
+`pubby.attribution`).
 
-The `on_interaction_received` callback is invoked after every new
-interaction is stored, enabling application-level notifications.
+Audience parsing (`to`/`cc`/`bto`/`bcc`, `Mention` tags) delegates to the
+`pubby.audience` helpers; only publicly addressed interactions are
+persisted, while `on_interaction_received` still fires for all accepted
+interactions, enabling application-level notifications.
 
-#### 6.3 `OutboxProcessor`
+#### 8.3 `OutboxProcessor`
 
 Responsible for:
 
@@ -283,17 +327,17 @@ Responsible for:
    (`retry_base_delay × 2^attempt`); 5xx responses and connection errors
    are retried, 4xx errors are not.
 
-#### 6.4 `_discovery`
+#### 8.4 `_discovery`
 
 Pure functions that build WebFinger JRD (RFC 7033) and NodeInfo 2.1
 response dicts.
 
-#### 6.5 `_client`
+#### 8.5 `_client`
 
 `get_default_user_agent(actor_id)` returns the default `User-Agent` string
 (`pubby/{version} (+{actor_id})`).
 
-#### 6.6 `pubby.client`
+#### 8.6 `pubby.client`
 
 One-off actor/inbox resolution for applications that build their own
 delivery pipeline:
@@ -306,7 +350,7 @@ delivery pipeline:
   using the actor cache and an optional signed HTTP GET, with
   allow/block domain filtering.
 
-### 7. WebFinger Client — `pubby.webfinger`
+### 9. WebFinger Client — `pubby.webfinger`
 
 - **`resolve_actor_url(username, domain)`** — performs a WebFinger lookup
   and returns the `self` link, falling back to
@@ -316,9 +360,9 @@ delivery pipeline:
 - **`Mention`** dataclass — carries `username`, `domain`, `actor_url`,
   plus helpers `acct` (property) and `to_tag()` (→ AP Mention tag dict).
 
-### 8. Storage — `pubby.storage`
+### 10. Storage — `pubby.storage`
 
-#### 8.1 Abstract Base — `ActivityPubStorage`
+#### 10.1 Abstract Base — `ActivityPubStorage`
 
 Defines the contract every storage backend must fulfill:
 
@@ -334,7 +378,7 @@ Defines the contract every storage backend must fulfill:
 have default (no-op) implementations so existing custom backends don't
 break when Pubby adds new features.
 
-#### 8.2 SQLAlchemy Adapter — `pubby.storage.adapters.db`
+#### 10.2 SQLAlchemy Adapter — `pubby.storage.adapters.db`
 
 - **Mixin models** (`_model.py`): `DbFollower`, `DbInteraction`,
   `DbActivity`, `DbActorCache` — framework-neutral SQLAlchemy column
@@ -358,7 +402,7 @@ break when Pubby adds new features.
   `postgresql+asyncpg` → `postgresql+psycopg2`).  Already-sync URLs pass
   through unchanged; unknown async drivers raise `ValueError`.
 
-#### 8.3 File Adapter — `pubby.storage.adapters.file`
+#### 10.3 File Adapter — `pubby.storage.adapters.file`
 
 `FileActivityPubStorage` stores entities as individual JSON files in a
 directory tree:
@@ -393,7 +437,7 @@ automatically runs any pending migrations (e.g., rebuilding indexes).
 Pass `auto_migrate=False` to disable.  The current schema version is 4,
 which adds `target_actor_id` to follower records.
 
-### 9. Render — `pubby.render`
+### 11. Render — `pubby.render`
 
 `InteractionsRenderer` uses Jinja2 (`PackageLoader` on the `templates/`
 directory) to produce safe HTML `Markup` for interactions.
@@ -411,7 +455,7 @@ HTML sanitization (`_sanitize_html`) strips disallowed tags and attributes
 via regex, permitting a safe subset (links, basic formatting,
 blockquotes, lists) and only `http`/`https` href schemes.
 
-### 10. Content Rendering — `pubby.content`
+### 12. Content Rendering — `pubby.content`
 
 A stdlib-only module that produces outbound ActivityPub HTML from local plain
 text.  It is intentionally independent of `pubby.render` (which sanitises
@@ -439,7 +483,7 @@ validated `http`/`https` URLs.
 - **`property_value_attachment(name, url, label=None)`** — builds a
   `PropertyValue` dict suitable for `ActorConfig.attachment`.
 
-### 11. Server Adapters — `pubby.server.adapters`
+### 13. Server Adapters — `pubby.server.adapters`
 
 Each framework gets two modules:
 
@@ -469,13 +513,13 @@ All `bind_activitypub()` functions register the same set of routes:
 The `prefix` (default `/ap`) is configurable.  The inbox route
 optionally applies the `RateLimiter`.
 
-### 12. Mastodon-Compatible API — `pubby.server.mastodon`
+### 14. Mastodon-Compatible API — `pubby.server.mastodon`
 
 A read-only subset of the
 [Mastodon REST API](https://docs.joinmastodon.org/methods/) so that
 Mastodon clients and crawlers can discover the instance.
 
-#### 12.1 Mappers (`_mappers.py`)
+#### 14.1 Mappers (`_mappers.py`)
 
 Pure functions that convert Pubby/AP types to Mastodon JSON shapes:
 
@@ -487,7 +531,7 @@ Pure functions that convert Pubby/AP types to Mastodon JSON shapes:
 | `tag_to_mastodon_tag()` | Hashtag → Mastodon Tag |
 | `stable_id()` / `id_to_url()` | Deterministic, reversible URL-safe base64 IDs |
 
-#### 12.2 Route Handlers (`_routes.py`)
+#### 14.2 Route Handlers (`_routes.py`)
 
 `MastodonAPI` is a stateless class whose methods return
 `(body, status_code)` tuples.  Framework adapters call these methods and
@@ -518,6 +562,9 @@ pubby.__init__
   ├── pubby._exceptions       (exception hierarchy)
   ├── pubby._rate_limit       (RateLimiter)
   ├── pubby.moderation         (instance domain allow/block helpers)
+  ├── pubby.audience           (audience/Mention parsing helpers) → _model
+  ├── pubby.attribution        (inbound object attribution validation)
+  │                             → _exceptions, moderation
   ├── pubby.content            (plain-text HTML renderers, Hashtag tag builder,
   │                             object content/duration helpers)
   ├── pubby.webfinger          (Mention, resolve_actor_url, extract_mentions)
