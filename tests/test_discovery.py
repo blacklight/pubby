@@ -2,6 +2,7 @@
 Tests for WebFinger and NodeInfo response builders.
 """
 
+import pubby
 from pubby.handlers._discovery import (
     build_nodeinfo_discovery,
     build_nodeinfo_document,
@@ -68,7 +69,7 @@ class TestNodeInfoDocument:
 
         assert result["version"] == "2.1"
         assert result["software"]["name"] == "pubby"
-        assert result["software"]["version"] == "0.0.1"
+        assert result["software"]["version"] == pubby.__version__
         assert "activitypub" in result["protocols"]
         assert result["usage"]["users"]["total"] == 1
         assert result["openRegistrations"] is False

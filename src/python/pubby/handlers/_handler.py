@@ -48,6 +48,7 @@ class ActivityPubHandler:
     :param webfinger_domain: Domain for WebFinger ``acct:`` URIs. Defaults
         to the domain from ``base_url``.
     :param user_agent: User-Agent string for outgoing HTTP requests.
+        Defaults to ``pubby/{__version__}``.
     :param http_timeout: Timeout in seconds for outgoing HTTP requests.
     :param max_retries: Maximum delivery retry attempts.
     :param max_delivery_workers: Maximum threads for concurrent delivery fan-out.
@@ -61,7 +62,8 @@ class ActivityPubHandler:
     :param local_base_urls: List of base URLs considered "local". If empty,
         defaults to the actor's base URL.
     :param software_name: Software name for NodeInfo.
-    :param software_version: Software version for NodeInfo.
+    :param software_version: Software version for NodeInfo. Defaults to
+        pubby's ``__version__``.
     :param async_delivery: If ``True``, delivery fan-out runs in a background
         thread and ``publish_object()`` / ``publish_activity()`` return
         immediately after storing the activity. This prevents slow or
@@ -99,7 +101,7 @@ class ActivityPubHandler:
         private_key_path: str | Path | None = None,
         on_interaction_received: Callable[[Interaction], None] | None = None,
         webfinger_domain: str | None = None,
-        user_agent: str = "pubby/0.0.1",
+        user_agent: str | None = None,
         http_timeout: float = 15.0,
         max_retries: int = 3,
         max_delivery_workers: int = 10,
@@ -107,7 +109,7 @@ class ActivityPubHandler:
         store_local_only: bool = False,
         local_base_urls: list[str] | None = None,
         software_name: str = "pubby",
-        software_version: str = "0.0.1",
+        software_version: str | None = None,
         async_delivery: bool = True,
         allowed_instances: Collection[str] | None = None,
         blocked_instances: Collection[str] | None = None,
@@ -162,6 +164,10 @@ class ActivityPubHandler:
 
         # Software info
         self.software_name = software_name
+        if software_version is None:
+            from pubby import __version__
+
+            software_version = __version__
         self.software_version = software_version
 
         # Sub-processors

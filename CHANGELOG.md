@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Changed
+
+- NodeInfo `software.version` now defaults to pubby's `__version__`
+  instead of the hardcoded `"0.0.1"`; the default outgoing
+  `User-Agent` likewise resolves to `pubby/{__version__}` when
+  `user_agent` is not provided. Downstream applications can still
+  override both via `ActivityPubHandler` parameters.
+
 ## 0.3.7
 
 ### Added

@@ -56,7 +56,7 @@ def build_nodeinfo_discovery(base_url: str) -> dict[str, Any]:
 
 def build_nodeinfo_document(
     software_name: str = "pubby",
-    software_version: str = "0.0.1",
+    software_version: str | None = None,
     total_users: int = 1,
     total_posts: int = 0,
     open_registrations: bool = False,
@@ -65,12 +65,18 @@ def build_nodeinfo_document(
     Build the NodeInfo 2.1 document.
 
     :param software_name: Name of the software.
-    :param software_version: Version of the software.
+    :param software_version: Version of the software. Defaults to
+        pubby's ``__version__``.
     :param total_users: Total number of users.
     :param total_posts: Total number of posts.
     :param open_registrations: Whether new registrations are accepted.
     :return: A NodeInfo 2.1 document.
     """
+    if software_version is None:
+        from pubby import __version__
+
+        software_version = __version__
+
     return {
         "version": "2.1",
         "software": {

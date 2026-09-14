@@ -675,7 +675,7 @@ always pass `target_actor_id` for precise removal.
 | `private_key_path` | str / Path | — | Path to PEM private key file |
 | `on_interaction_received` | `Callable` | `None` | Callback on new interaction |
 | `webfinger_domain` | `str` | from `base_url` | Domain for `acct:` URIs |
-| `user_agent` | `str` | `"pubby/0.0.1"` | Outgoing User-Agent |
+| `user_agent` | `str` | `pubby/{__version__}` | Outgoing User-Agent |
 | `http_timeout` | `float` | `15.0` | HTTP request timeout (seconds) |
 | `max_retries` | `int` | `3` | Delivery retry attempts |
 | `max_delivery_workers` | `int` | `10` | Concurrent delivery threads |
@@ -683,7 +683,7 @@ always pass `target_actor_id` for precise removal.
 | `store_local_only` | `bool` | `False` | Only store interactions targeting local URLs or mentioning the actor |
 | `local_base_urls` | `list[str]` | `None` | Base URLs considered "local" (defaults to actor's base URL) |
 | `software_name` | `str` | `"pubby"` | NodeInfo software name |
-| `software_version` | `str` | `"0.0.1"` | NodeInfo software version |
+| `software_version` | `str` | `pubby.__version__` | NodeInfo software version |
 | `async_delivery` | `bool` | `True` | Run delivery fan-out in background thread (non-blocking) |
 | `allowed_instances` | `Collection[str]` | `None` | Only federate with these instance domains (allow-list) |
 | `blocked_instances` | `Collection[str]` | `None` | Never federate with these instance domains (block-list) |
