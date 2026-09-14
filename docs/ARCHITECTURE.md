@@ -406,8 +406,9 @@ so existing custom backends don't break when Pubby adds new features.
 `get_followers_of_targets(target_ids)` returns followers whose
 `target_actor_id` is one of the given local target URLs — actor URLs or
 object ids (object-scoped follows, e.g. Friendica thread subscriptions);
-the base implementation filters `get_followers()` while the DB adapter
-uses an `IN` query.
+the base implementation filters `get_followers()`, the DB adapter
+uses an `IN` query, and the file adapter reads only the follower files
+named for the given targets.
 
 #### 10.2 SQLAlchemy Adapter — `pubby.storage.adapters.db`
 

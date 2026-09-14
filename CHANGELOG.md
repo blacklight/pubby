@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- Extended `ActivityPubStorage.get_followers_of_targets(target_ids)`
+  implementation also to `FileActivityPubStorage`.
+
 ## 0.3.8
 
 ### Added

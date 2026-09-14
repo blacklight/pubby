@@ -25,6 +25,7 @@ import hashlib
 import json
 import logging
 import threading
+from collections.abc import Collection
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -336,6 +337,35 @@ class FileActivityPubStorage(ActivityPubStorage):
                     result.append(follower)
                 elif not follower.target_actor_id:
                     # Unassigned/legacy followers are visible to all actors
+                    result.append(follower)
+        return result
+
+    def get_followers_of_targets(
+        self,
+        target_ids: Collection[str],
+    ) -> list[Follower]:
+        """
+        Return followers of any of the given local targets.
+
+        Targeted follower files are named ``{sanitize(target)}-*`` so only
+        matching files are read instead of the whole directory. The
+        ``target_actor_id`` is still verified after parsing — sanitized
+        prefixes are not guaranteed collision-free for pathological URLs.
+        """
+        wanted = set(target_ids)
+        result: list[Follower] = []
+        seen: set = set()
+        followers_dir = self.data_dir / "followers"
+        for target in wanted:
+            for fpath in followers_dir.glob(f"{_sanitize(target)}-*.json"):
+                if fpath in seen:
+                    continue
+                data = self.read_json(fpath)
+                if data is None:
+                    continue
+                follower = Follower.build(data)
+                if follower.target_actor_id in wanted:
+                    seen.add(fpath)
                     result.append(follower)
         return result
 

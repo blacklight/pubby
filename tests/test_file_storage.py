@@ -133,6 +133,49 @@ class TestFollowers:
         assert len(storage.get_followers(actor_id=actor_a)) == 1
         assert len(storage.get_followers(actor_id=actor_b)) == 1
 
+    def test_get_followers_of_targets(self, storage):
+        """Followers of a mix of actor and object targets are returned."""
+        actor = "https://blog.example.com/users/nemo"
+        obj = f"{actor}/objects/obj-1"
+        other = "https://blog.example.com/users/fabio"
+
+        storage.store_follower(
+            Follower(
+                actor_id="https://remote.example.com/users/alice",
+                inbox="https://remote.example.com/users/alice/inbox",
+                target_actor_id=actor,
+            )
+        )
+        storage.store_follower(
+            Follower(
+                actor_id="https://remote.example.com/users/bob",
+                inbox="https://remote.example.com/users/bob/inbox",
+                target_actor_id=obj,
+            )
+        )
+        storage.store_follower(
+            Follower(
+                actor_id="https://remote.example.com/users/carol",
+                inbox="https://remote.example.com/users/carol/inbox",
+                target_actor_id=other,
+            )
+        )
+        # Unassigned legacy followers are not included.
+        storage.store_follower(
+            Follower(
+                actor_id="https://remote.example.com/users/dan",
+                inbox="https://remote.example.com/users/dan/inbox",
+            )
+        )
+
+        followers = storage.get_followers_of_targets({actor, obj})
+        assert {f.actor_id for f in followers} == {
+            "https://remote.example.com/users/alice",
+            "https://remote.example.com/users/bob",
+        }
+
+        assert storage.get_followers_of_targets(set()) == []
+
     def test_remove_follower_by_target_actor(self, storage):
         actor_a = "https://blog.example.com/ap/actor"
         actor_b = "https://blog.example.com/ap/other"
