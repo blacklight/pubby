@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Added
+
+- `ActivityPubStorage.get_followers_of_targets(target_ids)` returns the
+  followers of a set of local targets — actor URLs or object ids — in one
+  query (`IN` on the DB adapter, filtered `get_followers()` by default).
+  Supports object-scoped follows (FEP-efda "followable objects"), e.g.
+  Friendica thread subscriptions sent as `Follow` on a thread's root
+  item. Unassigned legacy followers are excluded.
+
+### Fixed
+
+- Incoming `Follow` activities targeting *remote* actors or objects are
+  now dropped without an `Accept` instead of being stored as followers —
+  the remote server owns those collections. Locality is checked against
+  the bound actor's host plus `local_base_urls`, so object URLs need not
+  share a path prefix with the actor URL.
+
 ### Changed
 
 - NodeInfo `software.version` now defaults to pubby's `__version__`

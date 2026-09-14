@@ -125,7 +125,7 @@ and `build()` (← JSON-LD) round-trip methods.
 | `Object` | ActivityPub Object (Note, Article, Image, …). Supports `mediaType`, `contentMap`, `quoteControl`, `interactionPolicy`, and `duration`. `url` accepts `str` or a list of `Link` dicts; `attributedTo` accepts `str` or `list[str]` (federated media shapes such as `Audio`). |
 | `Activity` | ActivityPub Activity wrapper (Create, Follow, Like, …). |
 | `Interaction` | Stored interaction from a remote actor — maps AP activities to a displayable format (analogous to a Webmention). |
-| `Follower` | Stored follower record (actor ID, inbox, shared inbox, cached actor data, plus `target_actor_id` identifying the local actor being followed). |
+| `Follower` | Stored follower record (actor ID, inbox, shared inbox, cached actor data, plus `target_actor_id` identifying the local actor or followable object being followed). |
 
 **Enums:**
 
@@ -266,7 +266,10 @@ Dispatches incoming activities by type via a handler map:
 ```
 ActivityType → method
 ─────────────────────
-Follow       → _handle_follow      (store follower, send Accept)
+Follow       → _handle_follow      (store follower, send Accept; the target may
+                                    be an actor or a local object — FEP-efda
+                                    thread subscriptions — and non-local
+                                    targets are dropped without an Accept)
 Undo         → _handle_undo        (unfollow or undo like/boost)
 Create       → _handle_create      (reply, quote, or mention)
 Like         → _handle_like        (store like interaction)
@@ -391,15 +394,20 @@ Defines the contract every storage backend must fulfill:
 
 | Group | Methods |
 |-------|---------|
-| **Followers** | `store_follower()`, `remove_follower(actor_id, target_actor_id="")`, `get_followers(actor_id=None)` |
+| **Followers** | `store_follower()`, `remove_follower(actor_id, target_actor_id="")`, `get_followers(actor_id=None)`, `get_followers_of_targets(target_ids)` |
 | **Interactions** | `store_interaction()`, `delete_interaction()`, `delete_interaction_by_object_id()`, `get_interactions()`, `get_interaction_by_object_id()` |
 | **Activities** | `store_activity()`, `get_activities()` |
 | **Actor cache** | `cache_remote_actor()`, `get_cached_actor()` |
 | **Quote authorizations** | `store_quote_authorization()`, `get_quote_authorization()` |
 
-`delete_interaction_by_object_id()` and the quote-authorization methods
-have default (no-op) implementations so existing custom backends don't
-break when Pubby adds new features.
+`delete_interaction_by_object_id()`, `get_followers_of_targets()` and the
+quote-authorization methods have default (no-op/fallback) implementations
+so existing custom backends don't break when Pubby adds new features.
+`get_followers_of_targets(target_ids)` returns followers whose
+`target_actor_id` is one of the given local target URLs — actor URLs or
+object ids (object-scoped follows, e.g. Friendica thread subscriptions);
+the base implementation filters `get_followers()` while the DB adapter
+uses an `IN` query.
 
 #### 10.2 SQLAlchemy Adapter — `pubby.storage.adapters.db`
 
@@ -408,7 +416,7 @@ break when Pubby adds new features.
   definitions.  Users inherit these into their own declarative Base to
   choose table names.  `DbFollower` includes `target_actor_id` with a
   unique constraint on `(actor_id, target_actor_id)` so the same remote
-  actor can follow multiple local actors.
+  actor can follow multiple local actors or objects.
 - **`DbActivityPubStorage`** (`_storage.py`): full `ActivityPubStorage`
   implementation using a `session_factory` callable.  Upsert logic uses
   insert-then-update-on-`IntegrityError`.

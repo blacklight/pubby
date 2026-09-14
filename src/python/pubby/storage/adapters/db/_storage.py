@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Collection
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -172,6 +173,21 @@ class DbActivityPubStorage(ActivityPubStorage):
                     )
                 )
             return [row.to_follower() for row in query.all()]
+        finally:
+            session.close()
+
+    def get_followers_of_targets(
+        self,
+        target_ids: Collection[str],
+    ) -> list[Follower]:
+        session = self.session_factory()
+        try:
+            rows = (
+                session.query(self.follower_model)
+                .filter(self.follower_model.target_actor_id.in_(set(target_ids)))
+                .all()
+            )
+            return [row.to_follower() for row in rows]
         finally:
             session.close()
 

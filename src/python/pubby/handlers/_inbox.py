@@ -6,6 +6,7 @@ import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Callable, Collection
+from urllib.parse import urlparse
 
 import requests
 
@@ -108,6 +109,25 @@ class InboxProcessor:
         """Check if target_resource is considered local."""
         base_urls = self.local_base_urls or [self.actor_id.rsplit("/", 1)[0]]
         return any(target_resource.startswith(base) for base in base_urls)
+
+    def _is_local_follow_target(self, target_actor_id: str) -> bool:
+        """
+        Check whether a ``Follow`` target is a local actor or object.
+
+        The actor itself and anything on its host or under
+        ``local_base_urls`` counts as local; URL layouts are not assumed —
+        actor URLs and object URLs may live on different path prefixes.
+        """
+        if target_actor_id == self.actor_id:
+            return True
+        try:
+            same_host = (
+                urlparse(target_actor_id).netloc.lower()
+                == urlparse(self.actor_id).netloc.lower()
+            )
+        except Exception:
+            same_host = False
+        return same_host or self._is_local_target(target_actor_id)
 
     def _should_store_interaction(
         self,
@@ -351,6 +371,32 @@ class InboxProcessor:
         actor_id = activity.actor
         logger.info("Processing Follow from %s", actor_id)
 
+        # The Follow object identifies the local resource being followed.
+        # This is usually an actor, but it may also be a local object —
+        # e.g. Friendica sends ``Follow`` on a thread's root item for
+        # conversation subscriptions (FEP-efda "followable objects").
+        # Object follows are stored scoped to the object's own id.
+        target = activity.object
+        if isinstance(target, dict):
+            target_actor_id = target.get("id", "")
+        elif isinstance(target, str):
+            target_actor_id = target
+        else:
+            target_actor_id = ""
+        target_actor_id = target_actor_id or self.actor_id
+
+        # Follows of remote actors or objects are meaningless here — the
+        # remote server owns their followers collection and delivery — so
+        # they are dropped without an Accept (checked before fetching the
+        # actor, saving a request for irrelevant Follows).
+        if not self._is_local_follow_target(target_actor_id):
+            logger.info(
+                "Ignoring Follow of non-local target %s from %s",
+                target_actor_id,
+                actor_id,
+            )
+            return None
+
         # Fetch actor info to get their inbox
         actor_data = self._fetch_actor(actor_id)
         if actor_data is None:
@@ -360,16 +406,6 @@ class InboxProcessor:
         actor = Actor.build(actor_data)
         inbox = actor.inbox
         shared_inbox = actor.endpoints.get("sharedInbox", "")
-
-        # The Follow object identifies the local actor being followed.
-        target = activity.object
-        if isinstance(target, dict):
-            target_actor_id = target.get("id", "")
-        elif isinstance(target, str):
-            target_actor_id = target
-        else:
-            target_actor_id = ""
-        target_actor_id = target_actor_id or self.actor_id
 
         follower = Follower(
             actor_id=actor_id,

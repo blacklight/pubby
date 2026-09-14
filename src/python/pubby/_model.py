@@ -552,9 +552,11 @@ class Follower:
     """
     A stored follower record.
 
-    :param target_actor_id: The local actor URL being followed.
-        Empty string means the follower is not assigned to a specific actor
-        (legacy or unassigned).
+    :param target_actor_id: The local resource URL being followed —
+        normally an actor URL, but it may also be a local object id when a
+        remote actor follows an object (e.g. a thread subscription, see
+        FEP-efda "followable objects"). Empty string means the follower is
+        not assigned to a specific actor (legacy or unassigned).
     """
 
     actor_id: str

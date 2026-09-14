@@ -95,6 +95,64 @@ class TestHandleFollow:
         # Should POST to the follower's inbox
         mock_requests.post.assert_called_once()
 
+    @patch("pubby.handlers._inbox.requests")
+    def test_follow_local_object_stored_scoped_to_object(
+        self, mock_requests, inbox_processor, mock_storage
+    ):
+        """A Follow of a local object (thread subscription) is stored under the object id."""
+        actor_id = "https://remote.example.com/users/alice"
+        actor_data = _remote_actor_data(actor_id)
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = actor_data
+        mock_resp.raise_for_status = MagicMock()
+        mock_requests.get.return_value = mock_resp
+        mock_requests.post.return_value = MagicMock(status_code=202)
+
+        object_id = "https://blog.example.com/post/42"
+        activity = {
+            "id": f"{actor_id}/activities/follow-obj",
+            "type": "Follow",
+            "actor": actor_id,
+            "object": object_id,
+        }
+
+        result = inbox_processor.process(activity, skip_verification=True)
+
+        mock_storage.store_follower.assert_called_once()
+        follower = mock_storage.store_follower.call_args[0][0]
+        assert follower.actor_id == actor_id
+        assert follower.target_actor_id == object_id
+        assert result is not None and result["type"] == "Accept"
+
+    @patch("pubby.handlers._inbox.requests")
+    def test_follow_remote_target_dropped(
+        self, mock_requests, inbox_processor, mock_storage
+    ):
+        """A Follow of a remote actor or object is ignored — no follower, no Accept."""
+        actor_id = "https://remote.example.com/users/alice"
+        actor_data = _remote_actor_data(actor_id)
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = actor_data
+        mock_resp.raise_for_status = MagicMock()
+        mock_requests.get.return_value = mock_resp
+
+        activity = {
+            "id": f"{actor_id}/activities/follow-remote",
+            "type": "Follow",
+            "actor": actor_id,
+            "object": "https://other.example.com/users/carol",
+        }
+
+        result = inbox_processor.process(activity, skip_verification=True)
+
+        mock_storage.store_follower.assert_not_called()
+        mock_requests.post.assert_not_called()
+        assert result is None
+
 
 class TestHandleUndoFollow:
     def test_undo_follow_removes_follower(self, inbox_processor, mock_storage):
@@ -116,6 +174,27 @@ class TestHandleUndoFollow:
             actor_id,
             "https://blog.example.com/ap/actor",
         )
+
+    def test_undo_follow_local_object_removes_object_follower(
+        self, inbox_processor, mock_storage
+    ):
+        """An Undo(Follow) of a local object removes the object-scoped follower."""
+        actor_id = "https://remote.example.com/users/alice"
+        object_id = "https://blog.example.com/post/42"
+        activity = {
+            "id": f"{actor_id}/activities/undo-obj",
+            "type": "Undo",
+            "actor": actor_id,
+            "object": {
+                "id": f"{actor_id}/activities/follow-obj",
+                "type": "Follow",
+                "actor": actor_id,
+                "object": object_id,
+            },
+        }
+
+        inbox_processor.process(activity, skip_verification=True)
+        mock_storage.remove_follower.assert_called_once_with(actor_id, object_id)
 
 
 class TestHandleUndoLike:

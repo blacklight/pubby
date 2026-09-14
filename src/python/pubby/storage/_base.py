@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from collections.abc import Collection
 from datetime import datetime
 from typing import Any
 
@@ -23,8 +24,10 @@ class ActivityPubStorage(ABC):
         Store or update a follower record.
 
         The caller should set ``Follower.target_actor_id`` to the local
-        actor URL being followed. If left empty, the follower is treated
-        as unassigned and may be returned for any actor.
+        resource URL being followed — an actor URL for actor follows, or
+        a local object id for object follows (thread subscriptions). If
+        left empty, the follower is treated as unassigned and may be
+        returned for any actor.
 
         :param follower: The Follower to store.
         """
@@ -56,13 +59,32 @@ class ActivityPubStorage(ABC):
         Retrieve stored followers.
 
         :param actor_id: If provided, only return followers of this actor
-            (plus any unassigned followers with an empty ``target_actor_id``).
-            Implementations should include unassigned followers for backward
-            compatibility until the application backfills their
-            ``target_actor_id``.
+            or object (plus any unassigned followers with an empty
+            ``target_actor_id``). Implementations should include
+            unassigned followers for backward compatibility until the
+            application backfills their ``target_actor_id``.
             If None, return all followers.
         :return: A list of Follower records.
         """
+
+    def get_followers_of_targets(
+        self,
+        target_ids: Collection[str],
+    ) -> list[Follower]:
+        """
+        Retrieve followers of any of the given local targets.
+
+        ``target_ids`` may mix actor URLs and object ids — a ``Follow``
+        may legally target any local object (thread subscriptions), and
+        the application can use this to fan out thread updates to the
+        subscribers of every object in a reply chain. Unassigned
+        followers (empty ``target_actor_id``) are not included.
+
+        :param target_ids: Local actor URLs or object ids.
+        :return: A list of Follower records.
+        """
+        wanted = set(target_ids)
+        return [f for f in self.get_followers() if f.target_actor_id in wanted]
 
     # ---------- Interactions ----------
 

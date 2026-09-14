@@ -35,6 +35,7 @@
   - [File-based Storage](#file-based-storage)
   - [Multi-actor Support](#multi-actor-support)
     - [Upgrading from single-actor deployments](#upgrading-from-single-actor-deployments)
+    - [Followable objects (thread subscriptions)](#followable-objects-thread-subscriptions)
 - [Configuration Reference](#configuration-reference)
   - [`ActivityPubHandler` Parameters](#activitypubhandler-parameters)
   - [`actor_config`](#actor_config)
@@ -516,6 +517,9 @@ class MyStorage(ActivityPubStorage):
     def get_followers(self, actor_id: str | None = None) -> list[Follower]:
         ...
 
+    def get_followers_of_targets(self, target_ids: Collection[str]) -> list[Follower]:
+        ...  # Optional: default filters get_followers(); DB adapter uses IN
+
     def store_interaction(self, interaction: Interaction):
         ...
 
@@ -662,6 +666,29 @@ After backfilling, each follower appears only in the collection of the actor
 they follow. `remove_follower(actor_id)` without a `target_actor_id` removes
 all follow records from the given remote actor, so multi-actor code should
 always pass `target_actor_id` for precise removal.
+
+#### Followable objects (thread subscriptions)
+
+`Follow.object` is not restricted to actors — FEP-efda "followable objects"
+lets remote actors subscribe to a local object, e.g. a conversation thread
+(Friendica sends `Follow` on the thread's root item). `InboxProcessor`
+stores such rows scoped to the object's own URL in `target_actor_id`, so
+they stay out of every actor's follower collection, and `Undo(Follow)`
+retracts them by the same key. `Follow` activities targeting *remote*
+actors or objects are ignored entirely — no record, no `Accept` — since
+their followers collection belongs to the remote server. Locality is
+decided by the bound actor's host plus `local_base_urls`, so object URLs
+need not share a path prefix with the actor URL.
+
+To collect the subscribers of a set of objects — e.g. an activity's own
+object id plus its in-reply-to ancestors — use `get_followers_of_targets`,
+which returns only rows whose `target_actor_id` matches one of the given
+target URLs (unassigned legacy followers are excluded):
+
+```python
+subscribers = storage.get_followers_of_targets({root_object_id, parent_object_id})
+inboxes = collect_inboxes(subscribers)
+```
 
 ## Configuration Reference
 
@@ -1094,7 +1121,7 @@ follower = Follower(
 | `shared_inbox` | `str` | Shared inbox URL (optional) |
 | `followed_at` | `datetime` | When the follow was received |
 | `actor_data` | `dict` | Cached actor document |
-| `target_actor_id` | `str` | Local actor URL being followed (empty for unassigned/legacy) |
+| `target_actor_id` | `str` | Local resource URL being followed — an actor or a followable object (empty for unassigned/legacy) |
 
 #### Quote policies (Mastodon)
 
