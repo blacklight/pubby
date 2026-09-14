@@ -40,12 +40,20 @@ from .handlers._outbox import (
     build_announce_activity,
     build_delete_activity,
     build_like_activity,
+    build_quote_authorization,
+    build_quote_request_activity,
     build_undo_activity,
     build_update_activity,
     collect_inboxes,
     deliver_activity,
 )
 from .moderation import extract_domain, is_domain_blocked, normalize_domain
+from .quotes import (
+    PUBLIC_QUOTE_POLICY,
+    allow_public_quotes,
+    extract_quote_target,
+    set_quote_target,
+)
 from .storage import ActivityPubStorage
 from .webfinger import Mention, extract_mentions, resolve_actor_url
 
@@ -60,11 +68,14 @@ __all__ = [
     "Actor",
     "ActorConfig",
     "addressees",
+    "allow_public_quotes",
     "AttributionMismatch",
     "build_announce_activity",
     "build_delete_activity",
     "build_hashtag_tags",
     "build_like_activity",
+    "build_quote_authorization",
+    "build_quote_request_activity",
     "build_undo_activity",
     "build_update_activity",
     "collect_inboxes",
@@ -75,6 +86,7 @@ __all__ = [
     "extract_actor_inbox",
     "extract_domain",
     "extract_mentions",
+    "extract_quote_target",
     "Follower",
     "format_duration",
     "Interaction",
@@ -89,6 +101,7 @@ __all__ = [
     "Object",
     "ObjectType",
     "property_value_attachment",
+    "PUBLIC_QUOTE_POLICY",
     "PUBLIC_URIS",
     "RateLimiter",
     "RateLimitError",
@@ -100,6 +113,7 @@ __all__ = [
     "resolve_actor_inbox",
     "resolve_actor_url",
     "set_object_content",
+    "set_quote_target",
     "SignatureVerificationError",
     "validate_attribution",
 ]

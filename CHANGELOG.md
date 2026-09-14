@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `InboxProcessor` now recognizes the `quoteUri` field — emitted by
+  Fedibird, Akkoma and other fediverse servers — when detecting inbound
+  quote posts, alongside `quote`, `quoteUrl` and `_misskey_quote`.
+- New `pubby.quotes` helpers module for FEP-0449/FEP-044f quoting:
+  `extract_quote_target` (quoted-object detection across every field
+  spelling, now also used by `InboxProcessor`), `set_quote_target`
+  (stamps all spellings on an outgoing object), `PUBLIC_QUOTE_POLICY`
+  and `allow_public_quotes` (stamp the `interactionPolicy` allowing
+  public quoting without manual approval), and the shared
+  `FEP_044F_CONTEXT`/`FEP_044F_TERMS` JSON-LD context.
+- `pubby.build_quote_request_activity` (also available as
+  `handler.outbox.build_quote_request_activity`) builds an outgoing
+  FEP-044f `QuoteRequest` activity: the quoting object is embedded in
+  `instrument` and the request is addressed to the quoted post's author
+  by default.
+- `pubby.build_quote_authorization` builds a dereferenceable FEP-044f
+  `QuoteAuthorization` document for applications that approve a quote
+  of their own post themselves; `InboxProcessor` now uses it internally
+  when auto-approving incoming `QuoteRequest` activities.
+
 ## 0.3.6
 
 ### Fixed

@@ -1115,6 +1115,16 @@ obj = Object(
 )
 ```
 
+For raw object documents (or to stamp the policy on an `Object`'s
+serialized dict), `pubby.allow_public_quotes` applies the same policy —
+available as the `pubby.PUBLIC_QUOTE_POLICY` constant:
+
+```python
+from pubby import allow_public_quotes
+
+allow_public_quotes(note_document)   # sets note_document["interactionPolicy"]
+```
+
 If you include a non-empty `manualApproval`, Mastodon will create a
 pending quote request instead of immediately allowing it.
 
@@ -1137,8 +1147,18 @@ Pubby handles this automatically. The `QuoteAuthorization` objects are
 stored and served at `<prefix>/quote_authorizations/<id>`.
 
 Additionally, incoming `Create` activities that contain a `quote`,
-`quoteUrl`, or `_misskey_quote` field are stored as
-`InteractionType.QUOTE` interactions.
+`quoteUri`, `quoteUrl`, or `_misskey_quote` field are stored as
+`InteractionType.QUOTE` interactions. The same spellings are recognized
+by `pubby.extract_quote_target`, and `pubby.set_quote_target` stamps all
+of them on an outgoing object so every compatible server recognizes the
+quote:
+
+```python
+from pubby import extract_quote_target, set_quote_target
+
+set_quote_target(note_document, "https://remote.example.com/post/42")
+extract_quote_target(incoming_object)   # → quoted URL or None
+```
 
 This behaviour is controlled by the `auto_approve_quotes` parameter
 (default `True`). Set it to `False` to ignore `QuoteRequest` activities:
@@ -1148,6 +1168,24 @@ handler = ActivityPubHandler(
     ...,
     auto_approve_quotes=False,
 )
+```
+
+For the outgoing side, `build_quote_request_activity` builds the
+`QuoteRequest` activity to deliver to the quoted author's inbox (before
+the quoting post's `Create`), and `build_quote_authorization` builds the
+authorization document — useful when an application approves a quote of
+its own post itself rather than going through a remote `Accept`:
+
+```python
+from pubby import build_quote_authorization, build_quote_request_activity
+
+request = build_quote_request_activity(
+    actor_id="https://example.com/ap/actor",
+    quoted_object_id="https://remote.example.com/post/42",
+    instrument=quoting_note_document,      # the quoting Note, embedded
+    target_actor_id="https://remote.example.com/users/bob",
+)
+handler.publish_activity(request)        # delivered to bob's inbox
 ```
 
 #### `Mention`
@@ -1323,9 +1361,16 @@ Available builders on `handler.outbox`:
 | `build_announce_activity(object_url, *, activity_id=None, published=None)` | `Announce` (boost) activity dict |
 | `build_undo_activity(inner_activity)` | `Undo` activity dict wrapping any activity |
 | `build_update_activity(obj)` | `Update` activity dict wrapping the updated `Object` |
+| `build_quote_request_activity(quoted_object_id, instrument, target_actor_id, *, activity_id=None, published=None)` | FEP-044f `QuoteRequest` activity dict |
 
 `build_undo_activity` is intentionally generic — it works for
 `Undo Like`, `Undo Announce`, `Undo Follow`, etc.
+
+`build_quote_request_activity` addresses the request to
+`target_actor_id` — the quoted object's author — so `publish_activity`
+delivers it to their inbox as a direct recipient. See
+[QuoteAuthorization (FEP-044f)](#quoteauthorization-fep-044f) for the
+full outgoing-quote flow.
 
 #### Module-level builders
 
@@ -1337,6 +1382,8 @@ from pubby import (
     build_announce_activity,
     build_delete_activity,
     build_like_activity,
+    build_quote_authorization,
+    build_quote_request_activity,
     build_undo_activity,
     build_update_activity,
 )
@@ -1364,6 +1411,26 @@ delete = build_delete_activity(
 update = build_update_activity(
     actor_id="https://example.com/ap/actor",
     object_doc=updated_post_document,
+)
+
+# Request permission to quote a remote post (FEP-044f): the quoting
+# Note document travels embedded in `instrument` and the request is
+# addressed to the quoted post's author
+quote_request = build_quote_request_activity(
+    actor_id="https://example.com/ap/actor",
+    quoted_object_id="https://remote.example.com/post/42",
+    instrument=quoting_note_document,
+    target_actor_id="https://remote.example.com/users/bob",
+)
+
+# Issue a QuoteAuthorization document (e.g. when approving a quote of
+# your own post yourself); serve it at its `id` URL so remote servers
+# can verify it
+authorization = build_quote_authorization(
+    "https://example.com/ap/actor",
+    interacting_object="https://example.com/objects/quote-1",
+    interaction_target="https://example.com/objects/post-42",
+    to=["https://www.w3.org/ns/activitystreams#Public"],
 )
 ```
 

@@ -22,6 +22,7 @@ from .._model import (
 )
 from ..crypto import sign_request
 from ..moderation import is_domain_blocked
+from ..quotes import FEP_044F_CONTEXT
 from ..storage import ActivityPubStorage
 from ._client import get_default_user_agent
 
@@ -420,6 +421,124 @@ def build_update_activity(
     }
 
 
+def build_quote_request_activity(
+    actor_id: str,
+    quoted_object_id: str,
+    instrument: dict | str,
+    target_actor_id: str,
+    *,
+    to: list[str] | None = None,
+    cc: list[str] | None = None,
+    activity_id: str | None = None,
+    published: datetime | str | None = None,
+    context: Any = None,
+) -> dict:
+    """
+    Build a FEP-044f ``QuoteRequest`` activity for a quoting object.
+
+    ``instrument`` is the quoting object — pass the full Note document
+    (embedded) so the target server can approve without dereferencing
+    it; a bare object URL also works when the document is publicly
+    fetchable. ``target_actor_id`` is the quoted object's author: per
+    FEP-044f the request is addressed to them alone and delivered to
+    their inbox. When they ``Accept`` it they issue a
+    ``QuoteAuthorization`` for the instrument — see
+    :func:`build_quote_authorization`.
+
+    When ``to`` is omitted it defaults to ``[target_actor_id]``; ``cc``
+    defaults to empty.
+
+    :param actor_id: The actor ID (URL) requesting the quote.
+    :param quoted_object_id: The URL of the object being quoted
+        (the request's ``object``).
+    :param instrument: The quoting object document or its URL.
+    :param target_actor_id: The actor ID (URL) of the quoted object's
+        author — the request's default addressee.
+    :param to: Optional explicit ``to`` recipients. Defaults to
+        ``[target_actor_id]``.
+    :param cc: Optional explicit ``cc`` recipients. Defaults to empty.
+    :param activity_id: Optional explicit activity ID. If not provided,
+        a new unique ID is generated under ``actor_id``.
+    :param published: Optional publication timestamp. A ``datetime`` is
+        converted with ``.isoformat()``; a ``str`` is used as-is;
+        ``None`` defaults to the current UTC time.
+    :param context: Optional JSON-LD ``@context`` value. Defaults to
+        ``pubby.quotes.FEP_044F_CONTEXT``.
+    :return: The activity as a JSON-LD dictionary.
+    """
+    if to is None:
+        to = [target_actor_id]
+    if cc is None:
+        cc = []
+
+    return {
+        "@context": context if context is not None else FEP_044F_CONTEXT,
+        "id": activity_id or _new_activity_id(actor_id),
+        "type": "QuoteRequest",
+        "actor": actor_id,
+        "published": _format_published(published),
+        "object": quoted_object_id,
+        "instrument": instrument,
+        "to": to,
+        "cc": cc,
+    }
+
+
+def build_quote_authorization(
+    author_actor_id: str,
+    *,
+    interacting_object: str,
+    interaction_target: str,
+    authorization_id: str | None = None,
+    to: list[str] | None = None,
+    cc: list[str] | None = None,
+    context: Any = None,
+) -> dict:
+    """
+    Build a FEP-044f ``QuoteAuthorization`` document.
+
+    ``author_actor_id`` is the quoted object's author — the only party
+    allowed to approve the quote — and becomes the document's
+    ``attributedTo``. ``interacting_object`` is the quoting post and
+    ``interaction_target`` the quoted post, matching the gts vocabulary
+    terms declared in ``pubby.quotes.FEP_044F_CONTEXT``.
+
+    ``to``/``cc`` are optional: the document is meant to be
+    dereferenceable over HTTP, so audience fields are advisory. Pass
+    ``to=[AS_PUBLIC]`` (and optionally the author's followers in ``cc``)
+    to mark it publicly addressed; when omitted the fields are left out
+    entirely.
+
+    :param author_actor_id: The actor ID (URL) of the quoted object's
+        author issuing the authorization.
+    :param interacting_object: The URL of the quoting object.
+    :param interaction_target: The URL of the quoted object.
+    :param authorization_id: Optional explicit document ID. If not
+        provided, a new unique ID is generated under
+        ``author_actor_id`` — serve the document at that URL so remote
+        servers can verify it.
+    :param to: Optional ``to`` audience for the document.
+    :param cc: Optional ``cc`` audience for the document.
+    :param context: Optional JSON-LD ``@context`` value. Defaults to
+        ``pubby.quotes.FEP_044F_CONTEXT``.
+    :return: The ``QuoteAuthorization`` as a JSON-LD dictionary.
+    """
+    authorization = {
+        "@context": context if context is not None else FEP_044F_CONTEXT,
+        "id": authorization_id
+        or f"{author_actor_id}/quote_authorizations/{uuid.uuid4()}",
+        "type": "QuoteAuthorization",
+        "attributedTo": author_actor_id,
+        "interactingObject": interacting_object,
+        "interactionTarget": interaction_target,
+    }
+    if to is not None:
+        authorization["to"] = to
+    if cc is not None:
+        authorization["cc"] = cc
+    return authorization
+
+
 class OutboxProcessor:
     """
     Handles outbound activity creation and delivery.
@@ -627,6 +746,40 @@ class OutboxProcessor:
         return build_undo_activity(
             inner_activity=inner_activity,
             actor_id=self.actor_id,
+        )
+
+    def build_quote_request_activity(
+        self,
+        quoted_object_id: str,
+        instrument: dict | str,
+        target_actor_id: str,
+        *,
+        activity_id: str | None = None,
+        published: datetime | str | None = None,
+    ) -> dict:
+        """
+        Build a FEP-044f ``QuoteRequest`` activity for a quoting object.
+
+        The request is addressed to ``target_actor_id`` — the quoted
+        object's author — so :meth:`publish` delivers it to their inbox
+        as a direct recipient rather than to followers.
+
+        :param quoted_object_id: The URL of the object being quoted.
+        :param instrument: The quoting object document or its URL.
+        :param target_actor_id: The actor ID (URL) of the quoted
+            object's author.
+        :param activity_id: Optional explicit activity ID. If not
+            provided, a new unique ID is generated.
+        :param published: Optional publication timestamp. Defaults to now.
+        :return: The activity as a JSON-LD dictionary.
+        """
+        return build_quote_request_activity(
+            actor_id=self.actor_id,
+            quoted_object_id=quoted_object_id,
+            instrument=instrument,
+            target_actor_id=target_actor_id,
+            activity_id=activity_id,
+            published=published,
         )
 
     def publish(self, activity: dict) -> dict:

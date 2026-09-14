@@ -59,6 +59,7 @@ src/python/pubby/
 ├── _exceptions.py           # Exception hierarchy
 ├── _rate_limit.py           # In-memory sliding-window rate limiter
 ├── audience.py              # Audience/Mention parsing helpers
+├── quotes.py                # Quote field/policy helpers (FEP-0449, FEP-044f)
 ├── attribution.py           # Inbound object attribution validation
 ├── moderation.py            # Instance domain allow/block list helpers
 ├── webfinger.py             # WebFinger client (resolve_actor_url, extract_mentions)
@@ -298,7 +299,14 @@ enabled, `Create`/`Update` objects are additionally validated by
 Audience parsing (`to`/`cc`/`bto`/`bcc`, `Mention` tags) delegates to the
 `pubby.audience` helpers; only publicly addressed interactions are
 persisted, while `on_interaction_received` still fires for all accepted
-interactions, enabling application-level notifications.
+interactions, enabling application-level notifications.  Quote detection
+delegates to `pubby.quotes.extract_quote_target`, which recognizes every
+inbound spelling (`quote`, `quoteUri`, `quoteUrl`, `_misskey_quote`).
+
+`_handle_quote_request` builds the issued `QuoteAuthorization` with the
+module-level `build_quote_authorization()` helper from
+`pubby.handlers._outbox` and returns an `Accept` activity sharing the
+`pubby.quotes.FEP_044F_CONTEXT` JSON-LD context.
 
 #### 8.3 `OutboxProcessor`
 
@@ -307,13 +315,19 @@ Responsible for:
 1. **Building activities** — `build_create_activity()`,
    `build_update_activity()`, `build_delete_activity()`,
    `build_like_activity()`, `build_announce_activity()`,
-   `build_undo_activity()`.  These are thin wrappers around the
-   module-level `build_like_activity()`, `build_announce_activity()`,
-   `build_delete_activity()`, `build_undo_activity()`, and
-   `build_update_activity()` helpers, which accept explicit `actor_id`,
-   `to`/`cc`, `activity_id`, `published`, and `@context`.
+   `build_undo_activity()`, `build_quote_request_activity()`.  These are
+   thin wrappers around the module-level `build_like_activity()`,
+   `build_announce_activity()`, `build_delete_activity()`,
+   `build_undo_activity()`, `build_update_activity()`, and
+   `build_quote_request_activity()` helpers, which accept explicit
+   `actor_id`, `to`/`cc`, `activity_id`, `published`, and `@context`.
    `build_update_activity()` takes a full object document, syncs its
    `to`/`cc` to the envelope's audience, and stamps `updated` on it.
+   `build_quote_request_activity()` builds a FEP-044f `QuoteRequest`
+   (quoting object embedded in `instrument`, addressed to the quoted
+   object's author), and the module-level `build_quote_authorization()`
+   builds the `QuoteAuthorization` document issued when approving a
+   request — also used internally by `InboxProcessor`.
 2. **Publishing** — `publish(activity)` stores the activity, collects
    follower inboxes (preferring shared inboxes for deduplication, via the
    module-level `collect_inboxes()` helper), then fans out delivery
@@ -561,6 +575,26 @@ The framework-specific `bind_mastodon_api()` adapters also register
 NodeInfo 2.0 aliases (`/nodeinfo/2.0`, `/nodeinfo/2.0.json`,
 `/nodeinfo/2.1.json`).
 
+### 15. Quote Helpers — `pubby.quotes`
+
+Pure, stdlib-only helpers for the quote fields defined by
+[FEP-0449](https://codeberg.org/fediverse/fep/src/branch/main/fep/0449/fep-0449.md)
+and the FEP-044f interaction policy, shared by `InboxProcessor` and
+available to applications:
+
+| Function / constant | Purpose |
+|---------------------|---------|
+| `extract_quote_target(obj_data)` | Quoted object URL from any recognized spelling (`quote`, `quoteUri`, `quoteUrl`, `_misskey_quote`), or `None` |
+| `set_quote_target(obj, quoted_uri)` | Stamp all recognized spellings on an outgoing object so every compatible server recognizes the quote |
+| `allow_public_quotes(obj)` | Stamp `interactionPolicy` allowing anyone to quote without manual approval |
+| `PUBLIC_QUOTE_POLICY` | The `interactionPolicy` value stamped by `allow_public_quotes` |
+| `QUOTE_FIELD_KEYS` | Recognized quote field spellings, in precedence order |
+| `FEP_044F_CONTEXT` / `FEP_044F_TERMS` | JSON-LD context declaring the `QuoteRequest`/`QuoteAuthorization` and gts interaction terms |
+
+Outgoing-side payload construction lives with the other activity
+builders: `build_quote_request_activity()` and
+`build_quote_authorization()` in `pubby.handlers._outbox`.
+
 ---
 
 ## Dependency Graph (internal)
@@ -572,6 +606,7 @@ pubby.__init__
   ├── pubby._rate_limit       (RateLimiter)
   ├── pubby.moderation         (instance domain allow/block helpers)
   ├── pubby.audience           (audience/Mention parsing helpers) → _model
+  ├── pubby.quotes             (quote field/policy helpers) → _model
   ├── pubby.attribution        (inbound object attribution validation)
   │                             → _exceptions, moderation
   ├── pubby.content            (plain-text HTML renderers, Hashtag tag builder,
@@ -581,8 +616,9 @@ pubby.__init__
   ├── pubby.client             (extract_actor_inbox, resolve_actor_inbox)
   ├── pubby.handlers           (ActivityPubHandler)
   │     ├── _handler.py
-  │     │     ├── _inbox.py    → crypto, storage, _model, _exceptions, moderation
-  │     │     ├── _outbox.py   → crypto, storage, _model, moderation
+  │     │     ├── _inbox.py    → crypto, storage, _model, _exceptions,
+  │     │     │                    moderation, quotes, _outbox
+  │     │     ├── _outbox.py   → crypto, storage, _model, moderation, quotes
   │     │     ├── _discovery.py (pure functions)
   │     │     └── _client.py   (User-Agent helper)
   │     └── render/            → _model, jinja2, markupsafe
@@ -650,4 +686,7 @@ pubby.__init__
 
 8. **FEP-044f quote authorization** — incoming `QuoteRequest` activities
    are optionally auto-approved, with the `QuoteAuthorization` object
-   stored and served via a dedicated endpoint.
+   stored and served via a dedicated endpoint.  The outgoing side is
+   covered by `build_quote_request_activity()` /
+   `build_quote_authorization()` and the `pubby.quotes` field/policy
+   helpers.

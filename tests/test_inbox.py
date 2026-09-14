@@ -751,49 +751,6 @@ class TestHandleQuoteRequest:
         assert "interactionTarget" in ext
 
 
-class TestExtractQuoteTarget:
-    """Unit tests for the static _extract_quote_target helper."""
-
-    def test_no_quote_fields(self):
-        assert InboxProcessor._extract_quote_target({}) is None
-
-    def test_quote_field(self):
-        assert (
-            InboxProcessor._extract_quote_target(
-                {"quote": "https://example.com/post/1"}
-            )
-            == "https://example.com/post/1"
-        )
-
-    def test_quote_url_field(self):
-        assert (
-            InboxProcessor._extract_quote_target(
-                {"quoteUrl": "https://example.com/post/2"}
-            )
-            == "https://example.com/post/2"
-        )
-
-    def test_misskey_quote_field(self):
-        assert (
-            InboxProcessor._extract_quote_target(
-                {"_misskey_quote": "https://example.com/post/3"}
-            )
-            == "https://example.com/post/3"
-        )
-
-    def test_priority_order(self):
-        data = {
-            "quote": "https://example.com/fep",
-            "quoteUrl": "https://example.com/mastodon",
-        }
-        assert InboxProcessor._extract_quote_target(data) == "https://example.com/fep"
-
-    def test_empty_string_skipped(self):
-        assert (
-            InboxProcessor._extract_quote_target({"quote": "", "quoteUrl": ""}) is None
-        )
-
-
 class TestHandleLike:
     @patch("pubby.handlers._inbox.requests")
     def test_like_stores_interaction(

@@ -30,8 +30,10 @@ from ..audience import is_public, mentioned_actors
 from ..crypto import sign_request, verify_request
 from ..crypto._keys import load_public_key
 from ..moderation import extract_domain, is_domain_blocked
+from ..quotes import FEP_044F_CONTEXT, extract_quote_target
 from ..storage import ActivityPubStorage
 from ._client import get_default_user_agent
+from ._outbox import build_quote_authorization
 
 logger = logging.getLogger(__name__)
 
@@ -450,19 +452,6 @@ class InboxProcessor:
                 "Removed %s from %s on %s", interaction_type.value, actor_id, target
             )
 
-    @staticmethod
-    def _extract_quote_target(obj_data: dict) -> str | None:
-        """Extract the quoted object URL from a Create object, if present.
-
-        Checks the FEP-0449 ``quote`` field, Mastodon's ``quoteUrl``, and
-        Misskey's ``_misskey_quote``.
-        """
-        for key in ("quote", "quoteUrl", "_misskey_quote"):
-            value = obj_data.get(key)
-            if isinstance(value, str) and value:
-                return value
-        return None
-
     def _is_mention_of_actor(self, activity: Activity, obj_data: dict) -> bool:
         """Check if this Create activity is a direct mention of our actor."""
         # Check if actor is in to/cc fields
@@ -520,7 +509,7 @@ class InboxProcessor:
                 return None
 
         obj = Object.build(obj_data)
-        quote_target = self._extract_quote_target(obj_data)
+        quote_target = extract_quote_target(obj_data)
         target = obj.in_reply_to
 
         # Determine interaction type: quote > reply > mention
@@ -852,44 +841,19 @@ class InboxProcessor:
             return None
 
         # Build a dereferenceable QuoteAuthorization
-        auth_id = f"{self.actor_id}/quote_authorizations/{uuid.uuid4()}"
-
-        qa_context = [
-            "https://www.w3.org/ns/activitystreams",
-            {
-                "QuoteAuthorization": "https://w3id.org/fep/044f#QuoteAuthorization",
-                "gts": "https://gotosocial.org/ns#",
-                "interactingObject": {
-                    "@id": "gts:interactingObject",
-                    "@type": "@id",
-                },
-                "interactionTarget": {
-                    "@id": "gts:interactionTarget",
-                    "@type": "@id",
-                },
-            },
-        ]
-
-        authorization = {
-            "@context": qa_context,
-            "type": "QuoteAuthorization",
-            "id": auth_id,
-            "attributedTo": self.actor_id,
-            "interactionTarget": quoted_uri,
-            "interactingObject": quoting_uri,
-        }
+        authorization = build_quote_authorization(
+            self.actor_id,
+            interacting_object=quoting_uri,
+            interaction_target=quoted_uri,
+        )
+        auth_id = authorization["id"]
 
         # Store so it can be served via HTTP GET
         self.storage.store_quote_authorization(auth_id, authorization)
 
         # Wrap in an Accept and deliver to the quoting actor
-        accept_context = [
-            "https://www.w3.org/ns/activitystreams",
-            {"QuoteRequest": "https://w3id.org/fep/044f#QuoteRequest"},
-        ]
-
         accept_activity = {
-            "@context": accept_context,
+            "@context": FEP_044F_CONTEXT,
             "type": "Accept",
             "id": f"{self.actor_id}/activities/{uuid.uuid4()}",
             "actor": self.actor_id,
