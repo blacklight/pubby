@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from ...._model import (
     Follower,
+    FollowRequest,
     Interaction,
     InteractionStatus,
     InteractionType,
@@ -18,6 +19,7 @@ from ._model import (
     DbActivity,
     DbActorCache,
     DbFollower,
+    DbFollowRequest,
     DbInteraction,
     DbInteractionMention,
 )
@@ -82,6 +84,9 @@ class DbActivityPubStorage(ActivityPubStorage):
     :param actor_cache_model: Mapped model inheriting from DbActorCache.
     :param interaction_mention_model: Optional model inheriting from
         DbInteractionMention. Required for ``get_interactions_mentioning()``.
+    :param follow_request_model: Optional model inheriting from
+        DbFollowRequest. Required for pending follow requests
+        (manual follower approval).
     :param session_factory: SQLAlchemy session factory.
     """
 
@@ -94,6 +99,7 @@ class DbActivityPubStorage(ActivityPubStorage):
         activity_model: type[DbActivity],
         actor_cache_model: type[DbActorCache],
         interaction_mention_model: type[DbInteractionMention] | None = None,
+        follow_request_model: type[DbFollowRequest] | None = None,
         session_factory: Callable[[], Session],
         **__,
     ):
@@ -104,6 +110,7 @@ class DbActivityPubStorage(ActivityPubStorage):
         self.activity_model = activity_model
         self.actor_cache_model = actor_cache_model
         self.interaction_mention_model = interaction_mention_model
+        self.follow_request_model = follow_request_model
 
     # ---------- Followers ----------
 
@@ -188,6 +195,80 @@ class DbActivityPubStorage(ActivityPubStorage):
                 .all()
             )
             return [row.to_follower() for row in rows]
+        finally:
+            session.close()
+
+    # ---------- Follow requests ----------
+
+    def store_follow_request(self, request: FollowRequest):
+        if self.follow_request_model is None:
+            raise NotImplementedError(
+                "DbActivityPubStorage was configured without a follow_request_model"
+            )
+
+        session = self.session_factory()
+        try:
+            _upsert(
+                self.engine,
+                session,
+                self.follow_request_model.__table__,  # type: ignore
+                values={
+                    "actor_id": request.actor_id,
+                    "target_actor_id": request.target_actor_id or "",
+                    "inbox": request.inbox,
+                    "shared_inbox": request.shared_inbox,
+                    "actor_data": request.actor_data or {},
+                    "activity": request.activity or {},
+                    "requested_at": request.requested_at or datetime.now(timezone.utc),
+                },
+                index_elements=["actor_id", "target_actor_id"],
+                update_columns=[
+                    "inbox",
+                    "shared_inbox",
+                    "actor_data",
+                    "activity",
+                    "requested_at",
+                ],
+            )
+        finally:
+            session.close()
+
+    def get_follow_requests(
+        self,
+        target_actor_id: str | None = None,
+    ) -> list[FollowRequest]:
+        if self.follow_request_model is None:
+            return []
+        session = self.session_factory()
+        try:
+            query = session.query(self.follow_request_model)
+            if target_actor_id is not None:
+                query = query.filter(
+                    self.follow_request_model.target_actor_id == target_actor_id
+                )
+            return [row.to_request() for row in query.all()]
+        finally:
+            session.close()
+
+    def remove_follow_request(
+        self,
+        actor_id: str,
+        target_actor_id: str = "",
+    ) -> bool:
+        if self.follow_request_model is None:
+            return False
+        session = self.session_factory()
+        try:
+            query = session.query(self.follow_request_model).filter(
+                self.follow_request_model.actor_id == actor_id
+            )
+            if target_actor_id:
+                query = query.filter(
+                    self.follow_request_model.target_actor_id == target_actor_id
+                )
+            removed = query.delete(synchronize_session=False)
+            session.commit()
+            return bool(removed)
         finally:
             session.close()
 

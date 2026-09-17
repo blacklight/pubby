@@ -6,6 +6,28 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- Follow approval policies for incoming `Follow` activities. A new
+  `follow_policy` callback on `InboxProcessor` and `ActivityPubHandler`
+  is called with `(target_actor_id, requester_actor_id)` and returns a
+  `FollowPolicy`: `ACCEPT` (store follower, send `Accept` — the default),
+  `MANUAL` (store a pending `FollowRequest`, send no reply), or `REJECT`
+  (send `Reject`, store nothing). When unset and the actor config has
+  `manually_approves_followers=True`, follows are held for manual
+  approval, so the advertised `manuallyApprovesFollowers` actor flag is
+  now enforced. A failing callback resolves to `MANUAL` (fail closed).
+- Pending `FollowRequest` storage: `store_follow_request()`,
+  `get_follow_requests()`, `get_follow_request()` and
+  `remove_follow_request()` on `ActivityPubStorage` (backward-compatible
+  defaults; backends without support fall back to auto-accept), a new
+  `ap_follow_requests` table / `DbFollowRequest` model in the DB adapter,
+  and a `follow_requests/` directory in the file adapter.
+- `pubby.follows` helpers `accept_follow_request()`,
+  `reject_follow_request()` and `build_follow_response()` to resolve a
+  pending request: the former promotes it to a stored follower, both
+  deliver an `Accept`/`Reject` embedding the original `Follow` via the
+  built-in signed POST or an application-supplied `deliver` callback.
+- `Undo(Follow)` now removes a pending follow request in addition to the
+  accepted follower.
 - Extended `ActivityPubStorage.get_followers_of_targets(target_ids)`
   implementation also to `FileActivityPubStorage`.
 

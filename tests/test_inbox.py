@@ -9,6 +9,7 @@ import pytest
 
 from pubby._exceptions import SignatureVerificationError
 from pubby._model import (
+    FollowPolicy,
     InteractionType,
 )
 from pubby.crypto import sign_request
@@ -154,6 +155,161 @@ class TestHandleFollow:
         assert result is None
 
 
+class TestFollowPolicy:
+    def _processor(self, mock_storage, private_key, follow_policy):
+        return InboxProcessor(
+            storage=mock_storage,
+            actor_id="https://blog.example.com/ap/actor",
+            private_key=private_key,
+            key_id="https://blog.example.com/ap/actor#main-key",
+            follow_policy=follow_policy,
+        )
+
+    def _mock_actor_fetch(self, mock_requests, actor_id):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = _remote_actor_data(actor_id)
+        mock_resp.raise_for_status = MagicMock()
+        mock_requests.get.return_value = mock_resp
+
+    def _follow_activity(self, actor_id):
+        return {
+            "id": f"{actor_id}/activities/follow-1",
+            "type": "Follow",
+            "actor": actor_id,
+            "object": "https://blog.example.com/ap/actor",
+        }
+
+    @patch("pubby.handlers._inbox.requests")
+    def test_manual_policy_stores_request_without_accept(
+        self, mock_requests, mock_storage, private_key
+    ):
+        actor_id = "https://remote.example.com/users/alice"
+        self._mock_actor_fetch(mock_requests, actor_id)
+
+        processor = self._processor(
+            mock_storage, private_key, lambda *_: FollowPolicy.MANUAL
+        )
+        result = processor.process(
+            self._follow_activity(actor_id), skip_verification=True
+        )
+
+        assert result is None
+        mock_storage.store_follower.assert_not_called()
+        mock_storage.store_follow_request.assert_called_once()
+        request = mock_storage.store_follow_request.call_args[0][0]
+        assert request.actor_id == actor_id
+        assert request.target_actor_id == "https://blog.example.com/ap/actor"
+        assert request.inbox == f"{actor_id}/inbox"
+        assert request.shared_inbox == "https://remote.example.com/inbox"
+        assert request.activity["type"] == "Follow"
+        mock_requests.post.assert_not_called()
+
+    @patch("pubby.handlers._inbox.requests")
+    def test_manual_policy_accepts_string_value(
+        self, mock_requests, mock_storage, private_key
+    ):
+        actor_id = "https://remote.example.com/users/alice"
+        self._mock_actor_fetch(mock_requests, actor_id)
+
+        processor = self._processor(mock_storage, private_key, lambda *_: "manual")
+        processor.process(self._follow_activity(actor_id), skip_verification=True)
+
+        mock_storage.store_follow_request.assert_called_once()
+        mock_requests.post.assert_not_called()
+
+    @patch("pubby.handlers._inbox.requests")
+    def test_manual_policy_falls_back_to_accept_when_unsupported(
+        self, mock_requests, mock_storage, private_key
+    ):
+        actor_id = "https://remote.example.com/users/alice"
+        self._mock_actor_fetch(mock_requests, actor_id)
+        mock_requests.post.return_value = MagicMock(status_code=202)
+        mock_storage.store_follow_request.side_effect = NotImplementedError
+
+        processor = self._processor(
+            mock_storage, private_key, lambda *_: FollowPolicy.MANUAL
+        )
+        result = processor.process(
+            self._follow_activity(actor_id), skip_verification=True
+        )
+
+        mock_storage.store_follower.assert_called_once()
+        assert result is not None and result["type"] == "Accept"
+
+    @patch("pubby.handlers._inbox.requests")
+    def test_reject_policy_sends_reject_without_storing(
+        self, mock_requests, mock_storage, private_key
+    ):
+        actor_id = "https://remote.example.com/users/alice"
+        self._mock_actor_fetch(mock_requests, actor_id)
+        mock_requests.post.return_value = MagicMock(status_code=202)
+
+        processor = self._processor(
+            mock_storage, private_key, lambda *_: FollowPolicy.REJECT
+        )
+        result = processor.process(
+            self._follow_activity(actor_id), skip_verification=True
+        )
+
+        mock_storage.store_follower.assert_not_called()
+        mock_storage.store_follow_request.assert_not_called()
+        assert result is not None and result["type"] == "Reject"
+        assert result["object"]["type"] == "Follow"
+        mock_requests.post.assert_called_once()
+
+    @patch("pubby.handlers._inbox.requests")
+    def test_policy_callback_error_resolves_to_manual(
+        self, mock_requests, mock_storage, private_key
+    ):
+        actor_id = "https://remote.example.com/users/alice"
+        self._mock_actor_fetch(mock_requests, actor_id)
+
+        def failing(*_):
+            raise RuntimeError("boom")
+
+        processor = self._processor(mock_storage, private_key, failing)
+        result = processor.process(
+            self._follow_activity(actor_id), skip_verification=True
+        )
+
+        assert result is None
+        mock_storage.store_follow_request.assert_called_once()
+        mock_storage.store_follower.assert_not_called()
+
+    @patch("pubby.handlers._inbox.requests")
+    def test_policy_unknown_value_resolves_to_accept(
+        self, mock_requests, mock_storage, private_key
+    ):
+        actor_id = "https://remote.example.com/users/alice"
+        self._mock_actor_fetch(mock_requests, actor_id)
+        mock_requests.post.return_value = MagicMock(status_code=202)
+
+        processor = self._processor(mock_storage, private_key, lambda *_: "bogus")
+        result = processor.process(
+            self._follow_activity(actor_id), skip_verification=True
+        )
+
+        mock_storage.store_follower.assert_called_once()
+        assert result is not None and result["type"] == "Accept"
+
+    @patch("pubby.handlers._inbox.requests")
+    def test_policy_none_resolves_to_accept(
+        self, mock_requests, mock_storage, private_key
+    ):
+        actor_id = "https://remote.example.com/users/alice"
+        self._mock_actor_fetch(mock_requests, actor_id)
+        mock_requests.post.return_value = MagicMock(status_code=202)
+
+        processor = self._processor(mock_storage, private_key, lambda *_: None)
+        result = processor.process(
+            self._follow_activity(actor_id), skip_verification=True
+        )
+
+        mock_storage.store_follower.assert_called_once()
+        assert result is not None and result["type"] == "Accept"
+
+
 class TestHandleUndoFollow:
     def test_undo_follow_removes_follower(self, inbox_processor, mock_storage):
         actor_id = "https://remote.example.com/users/alice"
@@ -195,6 +351,27 @@ class TestHandleUndoFollow:
 
         inbox_processor.process(activity, skip_verification=True)
         mock_storage.remove_follower.assert_called_once_with(actor_id, object_id)
+
+    def test_undo_follow_removes_pending_request(self, inbox_processor, mock_storage):
+        """A withdrawn Follow clears a pending approval as well."""
+        actor_id = "https://remote.example.com/users/alice"
+        activity = {
+            "id": f"{actor_id}/activities/undo-pending",
+            "type": "Undo",
+            "actor": actor_id,
+            "object": {
+                "id": f"{actor_id}/activities/follow-1",
+                "type": "Follow",
+                "actor": actor_id,
+                "object": "https://blog.example.com/ap/actor",
+            },
+        }
+
+        inbox_processor.process(activity, skip_verification=True)
+        mock_storage.remove_follow_request.assert_called_once_with(
+            actor_id,
+            "https://blog.example.com/ap/actor",
+        )
 
 
 class TestHandleUndoLike:

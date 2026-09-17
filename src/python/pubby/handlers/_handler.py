@@ -15,6 +15,7 @@ from markupsafe import Markup
 from .._model import (
     Actor,
     ActorConfig,
+    FollowPolicy,
     Interaction,
     Object,
     AP_CONTEXT,
@@ -90,6 +91,12 @@ class ActivityPubHandler:
         objects are logged and dropped. Defaults to ``False`` — deployments
         behind relays or account migration may legitimately receive
         cross-host objects.
+    :param follow_policy: Optional callback deciding how an incoming
+        ``Follow`` is handled, forwarded to the inbox processor. When
+        unset and ``actor_config.manually_approves_followers`` is true,
+        every local target defaults to :attr:`FollowPolicy.MANUAL` so the
+        advertised ``manuallyApprovesFollowers`` flag is actually
+        enforced.
     """
 
     def __init__(
@@ -115,6 +122,7 @@ class ActivityPubHandler:
         blocked_instances: Collection[str] | None = None,
         deliver: Callable[[str, dict], None] | None = None,
         strict_attribution: bool = False,
+        follow_policy: Callable[[str, str], FollowPolicy | str | None] | None = None,
     ):
         self.storage = storage
 
@@ -185,6 +193,13 @@ class ActivityPubHandler:
             allowed_instances=allowed_instances,
             blocked_instances=blocked_instances,
             strict_attribution=strict_attribution,
+            follow_policy=(
+                follow_policy
+                if follow_policy is not None
+                else (
+                    (lambda *_: FollowPolicy.MANUAL) if self.manually_approves else None
+                )
+            ),
         )
 
         self.outbox = OutboxProcessor(

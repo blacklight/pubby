@@ -5,6 +5,7 @@ from typing import Any
 
 from .._model import (
     Follower,
+    FollowRequest,
     Interaction,
     InteractionStatus,
     InteractionType,
@@ -85,6 +86,68 @@ class ActivityPubStorage(ABC):
         """
         wanted = set(target_ids)
         return [f for f in self.get_followers() if f.target_actor_id in wanted]
+
+    # ---------- Follow requests (pending approvals) ----------
+
+    def store_follow_request(self, request: FollowRequest) -> Any:
+        """
+        Store or update a pending follow request.
+
+        Requests are keyed by ``(actor_id, target_actor_id)``: a repeated
+        ``Follow`` from the same actor refreshes the stored record.
+
+        :param request: The FollowRequest to store.
+        :raises NotImplementedError: When the backend does not support
+            pending requests; callers should fall back to auto-accepting.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support follow requests"
+        )
+
+    def get_follow_requests(
+        self,
+        target_actor_id: str | None = None,
+    ) -> list[FollowRequest]:
+        """
+        Retrieve pending follow requests.
+
+        :param target_actor_id: If provided, only return requests targeting
+            this local actor or object. If None, return all requests.
+        :return: A list of FollowRequest records.
+        """
+        return []
+
+    def get_follow_request(
+        self,
+        actor_id: str,
+        target_actor_id: str = "",
+    ) -> FollowRequest | None:
+        """
+        Retrieve the pending request from ``actor_id`` for ``target_actor_id``.
+
+        :param actor_id: The remote actor that sent the ``Follow``.
+        :param target_actor_id: The local actor or object URL being followed.
+        :return: The FollowRequest, or None if no request is pending.
+        """
+        for request in self.get_follow_requests(target_actor_id):
+            if request.actor_id == actor_id:
+                return request
+        return None
+
+    def remove_follow_request(
+        self,
+        actor_id: str,
+        target_actor_id: str = "",
+    ) -> bool:
+        """
+        Remove a pending follow request.
+
+        :param actor_id: The remote actor whose request is removed.
+        :param target_actor_id: Scope the removal to this target. When
+            empty, all requests from this remote actor are removed.
+        :return: True if at least one request was removed.
+        """
+        return False
 
     # ---------- Interactions ----------
 

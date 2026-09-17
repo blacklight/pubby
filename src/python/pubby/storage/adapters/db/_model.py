@@ -4,6 +4,7 @@ import sqlalchemy as sa
 
 from ...._model import (
     Follower,
+    FollowRequest,
     Interaction,
     InteractionStatus,
     InteractionType,
@@ -60,6 +61,62 @@ class DbFollower:
             followed_at=self.followed_at,  # type: ignore
             actor_data=dict(self.actor_data) if self.actor_data else {},  # type: ignore
             target_actor_id=self.target_actor_id or "",  # type: ignore
+        )
+
+
+class DbFollowRequest:
+    """
+    SQLAlchemy base model for pending follow requests.
+
+    Inherit this in a mapped model with a ``__tablename__``.
+    """
+
+    id = sa.Column(sa.Integer, primary_key=True, autoincrement=True)
+    actor_id = sa.Column(sa.String, nullable=False)
+    target_actor_id = sa.Column(sa.String, nullable=False, default="", index=True)
+    inbox = sa.Column(sa.String, nullable=False)
+    shared_inbox = sa.Column(sa.String, nullable=False, default="")
+    actor_data = sa.Column(sa.JSON, nullable=False, default=dict)
+    activity = sa.Column(sa.JSON, nullable=False, default=dict)
+    requested_at = sa.Column(sa.DateTime, nullable=False)
+
+    __table_args__ = (
+        sa.UniqueConstraint(
+            "actor_id",
+            "target_actor_id",
+            name="uix_follow_request_actor_target",
+        ),
+    )
+
+    def __init__(self, *_, **kwargs):
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
+    @classmethod
+    def columns(cls) -> set[str]:
+        return {c.name for c in cls.__table__.columns}  # type: ignore
+
+    @classmethod
+    def from_request(cls, request: FollowRequest) -> "DbFollowRequest":
+        return cls(
+            actor_id=request.actor_id,
+            target_actor_id=request.target_actor_id or "",
+            inbox=request.inbox,
+            shared_inbox=request.shared_inbox,
+            actor_data=request.actor_data or {},
+            activity=request.activity or {},
+            requested_at=request.requested_at or datetime.now(timezone.utc),
+        )
+
+    def to_request(self) -> FollowRequest:
+        return FollowRequest(
+            actor_id=self.actor_id,  # type: ignore
+            target_actor_id=self.target_actor_id or "",  # type: ignore
+            inbox=self.inbox,  # type: ignore
+            shared_inbox=self.shared_inbox or "",  # type: ignore
+            actor_data=dict(self.actor_data) if self.actor_data else {},  # type: ignore
+            activity=dict(self.activity) if self.activity else {},  # type: ignore
+            requested_at=self.requested_at,  # type: ignore
         )
 
 

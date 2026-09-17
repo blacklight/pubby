@@ -12,6 +12,8 @@ from ._model import (
     ActorConfig,
     DeliveryStatus,
     Follower,
+    FollowPolicy,
+    FollowRequest,
     Interaction,
     InteractionStatus,
     InteractionType,
@@ -47,6 +49,11 @@ from .handlers._outbox import (
     collect_inboxes,
     deliver_activity,
 )
+from .follows import (
+    accept_follow_request,
+    build_follow_response,
+    reject_follow_request,
+)
 from .moderation import extract_domain, is_domain_blocked, normalize_domain
 from .quotes import (
     PUBLIC_QUOTE_POLICY,
@@ -67,11 +74,13 @@ __all__ = [
     "ActivityType",
     "Actor",
     "ActorConfig",
+    "accept_follow_request",
     "addressees",
     "allow_public_quotes",
     "AttributionMismatch",
     "build_announce_activity",
     "build_delete_activity",
+    "build_follow_response",
     "build_hashtag_tags",
     "build_like_activity",
     "build_quote_authorization",
@@ -88,6 +97,8 @@ __all__ = [
     "extract_mentions",
     "extract_quote_target",
     "Follower",
+    "FollowPolicy",
+    "FollowRequest",
     "format_duration",
     "Interaction",
     "InteractionStatus",
@@ -105,6 +116,7 @@ __all__ = [
     "PUBLIC_URIS",
     "RateLimiter",
     "RateLimitError",
+    "reject_follow_request",
     "render_bio_html",
     "render_link_anchor",
     "render_post_html",

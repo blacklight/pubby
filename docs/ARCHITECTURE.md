@@ -61,6 +61,7 @@ src/python/pubby/
 ├── audience.py              # Audience/Mention parsing helpers
 ├── quotes.py                # Quote field/policy helpers (FEP-0449, FEP-044f)
 ├── attribution.py           # Inbound object attribution validation
+├── follows.py               # Pending follow-request resolution (Accept/Reject helpers)
 ├── moderation.py            # Instance domain allow/block list helpers
 ├── webfinger.py             # WebFinger client (resolve_actor_url, extract_mentions)
 │
@@ -126,6 +127,7 @@ and `build()` (← JSON-LD) round-trip methods.
 | `Activity` | ActivityPub Activity wrapper (Create, Follow, Like, …). |
 | `Interaction` | Stored interaction from a remote actor — maps AP activities to a displayable format (analogous to a Webmention). |
 | `Follower` | Stored follower record (actor ID, inbox, shared inbox, cached actor data, plus `target_actor_id` identifying the local actor or followable object being followed). |
+| `FollowRequest` | Pending follow request awaiting approval (requester actor/inbox, `target_actor_id`, cached actor data, the raw `Follow` activity for verbatim `Accept`/`Reject` embedding, `requested_at`). |
 
 **Enums:**
 
@@ -133,6 +135,7 @@ and `build()` (← JSON-LD) round-trip methods.
 |------|--------|
 | `ActivityType` | `Create`, `Update`, `Delete`, `Follow`, `Undo`, `Accept`, `Reject`, `Like`, `Announce`, `QuoteRequest` |
 | `ObjectType` | `Note`, `Article`, `Image`, `Video`, `Audio`, `Page`, `Event`, `Tombstone` |
+| `FollowPolicy` | `accept` (store + `Accept`), `manual` (store `FollowRequest`, no reply), `reject` (send `Reject`) |
 | `InteractionType` | `reply`, `like`, `boost`, `mention`, `quote` |
 | `InteractionStatus` | `pending`, `confirmed`, `deleted` |
 | `DeliveryStatus` | `pending`, `delivered`, `failed` |
@@ -266,11 +269,18 @@ Dispatches incoming activities by type via a handler map:
 ```
 ActivityType → method
 ─────────────────────
-Follow       → _handle_follow      (store follower, send Accept; the target may
-                                    be an actor or a local object — FEP-efda
-                                    thread subscriptions — and non-local
-                                    targets are dropped without an Accept)
-Undo         → _handle_undo        (unfollow or undo like/boost)
+Follow       → _handle_follow      (per the `follow_policy` callback —
+                                    ACCEPT: store follower, send Accept;
+                                    MANUAL: store a pending FollowRequest,
+                                    no reply; REJECT: send Reject. The
+                                    target may be an actor or a local
+                                    object — FEP-efda thread
+                                    subscriptions — and non-local
+                                    targets are dropped without an
+                                    Accept)
+Undo         → _handle_undo        (unfollow or undo like/boost; an
+                                    Undo(Follow) also clears a pending
+                                    follow request)
 Create       → _handle_create      (reply, quote, or mention)
 Like         → _handle_like        (store like interaction)
 Announce     → _handle_announce    (store boost interaction)
@@ -395,36 +405,43 @@ Defines the contract every storage backend must fulfill:
 | Group | Methods |
 |-------|---------|
 | **Followers** | `store_follower()`, `remove_follower(actor_id, target_actor_id="")`, `get_followers(actor_id=None)`, `get_followers_of_targets(target_ids)` |
+| **Follow requests** | `store_follow_request()`, `get_follow_requests(target_actor_id=None)`, `get_follow_request(actor_id, target_actor_id)`, `remove_follow_request(actor_id, target_actor_id="")` |
 | **Interactions** | `store_interaction()`, `delete_interaction()`, `delete_interaction_by_object_id()`, `get_interactions()`, `get_interaction_by_object_id()` |
 | **Activities** | `store_activity()`, `get_activities()` |
 | **Actor cache** | `cache_remote_actor()`, `get_cached_actor()` |
 | **Quote authorizations** | `store_quote_authorization()`, `get_quote_authorization()` |
 
-`delete_interaction_by_object_id()`, `get_followers_of_targets()` and the
-quote-authorization methods have default (no-op/fallback) implementations
-so existing custom backends don't break when Pubby adds new features.
+`delete_interaction_by_object_id()`, `get_followers_of_targets()`, the
+quote-authorization methods and the follow-request methods have default
+(no-op/fallback) implementations so existing custom backends don't break
+when Pubby adds new features.
 `get_followers_of_targets(target_ids)` returns followers whose
 `target_actor_id` is one of the given local target URLs — actor URLs or
 object ids (object-scoped follows, e.g. Friendica thread subscriptions);
 the base implementation filters `get_followers()`, the DB adapter
 uses an `IN` query, and the file adapter reads only the follower files
-named for the given targets.
+named for the given targets.  On backends without follow-request
+support, a `MANUAL` policy falls back to the historical auto-accept
+behavior.
 
 #### 10.2 SQLAlchemy Adapter — `pubby.storage.adapters.db`
 
 - **Mixin models** (`_model.py`): `DbFollower`, `DbInteraction`,
-  `DbActivity`, `DbActorCache` — framework-neutral SQLAlchemy column
+  `DbActivity`, `DbActorCache`, `DbFollowRequest` — framework-neutral
+  SQLAlchemy column
   definitions.  Users inherit these into their own declarative Base to
   choose table names.  `DbFollower` includes `target_actor_id` with a
   unique constraint on `(actor_id, target_actor_id)` so the same remote
-  actor can follow multiple local actors or objects.
+  actor can follow multiple local actors or objects; `DbFollowRequest`
+  uses the same key for pending requests.
 - **`DbActivityPubStorage`** (`_storage.py`): full `ActivityPubStorage`
   implementation using a `session_factory` callable.  Upsert logic uses
   insert-then-update-on-`IntegrityError`.
 - **`init_db_storage(engine)`** (`_helpers.py`): convenience function that
   creates a self-contained declarative Base, mapped models with default
-  table names (`ap_followers`, `ap_interactions`, `ap_activities`,
-  `ap_actor_cache`), calls `create_all()`, and returns a ready-to-use
+  table names (`ap_followers`, `ap_follow_requests`, `ap_interactions`,
+  `ap_activities`, `ap_actor_cache`), calls `create_all()`, and returns a
+  ready-to-use
   `DbActivityPubStorage`.  String URLs using a known async driver are
   converted via `to_sync_url()` before `create_engine()`; `driver_map`
   extends or overrides `DEFAULT_ASYNC_DRIVER_MAP`.
@@ -443,6 +460,8 @@ directory tree:
 data_dir/
 ├── followers/{hash}.json                     # unassigned/legacy followers
 ├── followers/{target_hash}-{actor_hash}.json # per-actor followers (v4+)
+├── follow_requests/                          # pending follow approvals,
+│   └── (same filename scheme as followers/)  # no schema bump needed
 ├── interactions/
 │   ├── {target_hash}/{type}-{actor_hash}.json
 │   ├── _mentions/{actor_hash}.json      # mention index

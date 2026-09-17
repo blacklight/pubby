@@ -6,6 +6,8 @@ Stores data as JSON files organized by type:
     data_dir/
     ├── followers/
     │   └── {sanitized_actor_id}.json
+    ├── follow_requests/
+    │   └── {sanitized_target}-{sanitized_actor_id}.json
     ├── interactions/
     │   ├── {sanitized_target}/
     │   │   ├── {type}-{sanitized_actor}.json       (like/boost/mention)
@@ -32,6 +34,7 @@ from typing import Any
 
 from ...._model import (
     Follower,
+    FollowRequest,
     Interaction,
     InteractionStatus,
     InteractionType,
@@ -368,6 +371,72 @@ class FileActivityPubStorage(ActivityPubStorage):
                     seen.add(fpath)
                     result.append(follower)
         return result
+
+    # ---------- Follow requests ----------
+
+    def _follow_request_path(
+        self,
+        actor_id: str,
+        target_actor_id: str = "",
+    ) -> Path:
+        """Path to a pending follow request file (same layout as followers)."""
+        if target_actor_id:
+            filename = f"{_sanitize(target_actor_id)}-{_sanitize(actor_id)}.json"
+        else:
+            filename = f"{_sanitize(actor_id)}.json"
+        return self.data_dir / "follow_requests" / filename
+
+    def store_follow_request(self, request: FollowRequest):
+        path = self._follow_request_path(
+            request.actor_id,
+            request.target_actor_id or "",
+        )
+        self.write_json(path, request.to_dict())
+
+    def get_follow_requests(
+        self,
+        target_actor_id: str | None = None,
+    ) -> list[FollowRequest]:
+        requests_dir = self.data_dir / "follow_requests"
+        result = []
+        for fpath in self.list_json_files(requests_dir):
+            data = self.read_json(fpath)
+            if data is not None:
+                request = FollowRequest.build(data)
+                if (
+                    target_actor_id is None
+                    or request.target_actor_id == target_actor_id
+                ):
+                    result.append(request)
+        return result
+
+    def get_follow_request(
+        self,
+        actor_id: str,
+        target_actor_id: str = "",
+    ) -> FollowRequest | None:
+        path = self._follow_request_path(actor_id, target_actor_id)
+        data = self.read_json(path)
+        if data is None:
+            return None
+        return FollowRequest.build(data)
+
+    def remove_follow_request(
+        self,
+        actor_id: str,
+        target_actor_id: str = "",
+    ) -> bool:
+        if target_actor_id:
+            return self._delete_file(
+                self._follow_request_path(actor_id, target_actor_id)
+            )
+        removed = False
+        requests_dir = self.data_dir / "follow_requests"
+        for fpath in self.list_json_files(requests_dir):
+            data = self.read_json(fpath)
+            if data is not None and data.get("actor_id") == actor_id:
+                removed = self._delete_file(fpath) or removed
+        return removed
 
     # ---------- Interactions ----------
 

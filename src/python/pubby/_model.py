@@ -91,6 +91,22 @@ class DeliveryStatus(str, Enum):
     FAILED = "failed"
 
 
+class FollowPolicy(str, Enum):
+    """How an incoming ``Follow`` for a local target is handled.
+
+    ``ACCEPT`` stores the follower and replies ``Accept`` immediately.
+    ``MANUAL`` stores a pending :class:`FollowRequest` and sends no reply —
+    the requester stays "pending" until the application calls
+    :func:`pubby.accept_follow_request` or
+    :func:`pubby.reject_follow_request`. ``REJECT`` replies ``Reject`` and
+    stores nothing.
+    """
+
+    ACCEPT = "accept"
+    MANUAL = "manual"
+    REJECT = "reject"
+
+
 # ---------- Helper ----------
 
 
@@ -544,6 +560,50 @@ class Interaction:
             created_at=_parse_dt(data.get("created_at")),
             updated_at=_parse_dt(data.get("updated_at")),
             mentioned_actors=data.get("mentioned_actors", []),
+        )
+
+
+@dataclass
+class FollowRequest:
+    """
+    A pending follow request awaiting approval.
+
+    Stored when the inbox policy resolves to
+    :attr:`FollowPolicy.MANUAL`; the raw ``Follow`` activity is kept in
+    ``activity`` so a later ``Accept``/``Reject`` can embed it verbatim.
+
+    :param actor_id: The remote actor requesting the follow.
+    :param target_actor_id: The local actor or object URL being followed.
+    :param inbox: The requester's inbox URL (Accept/Reject destination).
+    :param shared_inbox: The requester's shared inbox URL, if any.
+    :param actor_data: The requester's cached actor document.
+    :param activity: The raw incoming ``Follow`` activity.
+    :param requested_at: When the request was received.
+    """
+
+    actor_id: str
+    target_actor_id: str
+    inbox: str
+    shared_inbox: str = ""
+    actor_data: dict = field(default_factory=dict)
+    activity: dict = field(default_factory=dict)
+    requested_at: datetime | None = None
+
+    def to_dict(self) -> dict:
+        """Return a JSON-serializable dictionary."""
+        return _normalize(asdict(self))
+
+    @classmethod
+    def build(cls, data: dict) -> "FollowRequest":
+        """Build a FollowRequest from a dictionary."""
+        return cls(
+            actor_id=data.get("actor_id", ""),
+            target_actor_id=data.get("target_actor_id", ""),
+            inbox=data.get("inbox", ""),
+            shared_inbox=data.get("shared_inbox", ""),
+            actor_data=data.get("actor_data", {}),
+            activity=data.get("activity", {}),
+            requested_at=_parse_dt(data.get("requested_at")),
         )
 
 

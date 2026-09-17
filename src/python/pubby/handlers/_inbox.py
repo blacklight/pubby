@@ -15,6 +15,8 @@ from .._model import (
     ActivityType,
     Actor,
     Follower,
+    FollowPolicy,
+    FollowRequest,
     Interaction,
     InteractionStatus,
     InteractionType,
@@ -72,6 +74,16 @@ class InboxProcessor:
         Mismatched objects are logged and dropped. Defaults to ``False`` —
         deployments behind relays or account migration may legitimately
         receive cross-host objects.
+    :param follow_policy: Optional callback deciding how an incoming
+        ``Follow`` is handled. Called with ``(target_actor_id,
+        requester_actor_id)`` and should return a :class:`FollowPolicy`
+        (or its string value): ``ACCEPT`` stores the follower and replies
+        ``Accept`` (the default when the callback is unset, returns
+        ``None``, or returns an unknown value), ``MANUAL`` stores a
+        pending :class:`FollowRequest` and sends no reply, ``REJECT``
+        replies ``Reject`` and stores nothing. A callback that raises
+        resolves to ``MANUAL`` — a policy failure must not silently
+        grant a follow.
     """
 
     def __init__(
@@ -90,6 +102,7 @@ class InboxProcessor:
         allowed_instances: Collection[str] | None = None,
         blocked_instances: Collection[str] | None = None,
         strict_attribution: bool = False,
+        follow_policy: Callable[[str, str], FollowPolicy | str | None] | None = None,
     ):
         self.storage = storage
         self.actor_id = actor_id
@@ -104,6 +117,7 @@ class InboxProcessor:
         self.allowed_instances = allowed_instances
         self.blocked_instances = blocked_instances
         self.strict_attribution = strict_attribution
+        self.follow_policy = follow_policy
 
     def _is_local_target(self, target_resource: str) -> bool:
         """Check if target_resource is considered local."""
@@ -407,6 +421,47 @@ class InboxProcessor:
         inbox = actor.inbox
         shared_inbox = actor.endpoints.get("sharedInbox", "")
 
+        policy = self._resolve_follow_policy(target_actor_id, actor_id)
+
+        if policy is FollowPolicy.REJECT:
+            reject_activity = {
+                "@context": AP_CONTEXT,
+                "id": f"{self.actor_id}#reject-{activity.id}",
+                "type": "Reject",
+                "actor": self.actor_id,
+                "object": raw,
+            }
+            self._deliver_to_inbox(inbox, reject_activity)
+            return reject_activity
+
+        if policy is FollowPolicy.MANUAL:
+            request = FollowRequest(
+                actor_id=actor_id,
+                target_actor_id=target_actor_id,
+                inbox=inbox,
+                shared_inbox=shared_inbox,
+                actor_data=actor_data,
+                activity=raw,
+                requested_at=datetime.now(timezone.utc),
+            )
+            try:
+                self.storage.store_follow_request(request)
+            except NotImplementedError:
+                # Backends without pending-request support keep the
+                # historical auto-accept behavior.
+                logger.warning(
+                    "Storage does not support follow requests; "
+                    "auto-accepting Follow from %s",
+                    actor_id,
+                )
+            else:
+                logger.info(
+                    "Follow from %s to %s is pending approval",
+                    actor_id,
+                    target_actor_id,
+                )
+                return None
+
         follower = Follower(
             actor_id=actor_id,
             inbox=inbox,
@@ -428,6 +483,41 @@ class InboxProcessor:
 
         self._deliver_to_inbox(inbox, accept_activity)
         return accept_activity
+
+    def _resolve_follow_policy(
+        self, target_actor_id: str, requester_actor_id: str
+    ) -> FollowPolicy:
+        """
+        Evaluate the configured ``follow_policy`` callback.
+
+        No callback, ``None`` and unknown values resolve to
+        :attr:`FollowPolicy.ACCEPT`; a callback that raises resolves to
+        :attr:`FollowPolicy.MANUAL` — a policy failure must not silently
+        grant a follow.
+        """
+        if self.follow_policy is None:
+            return FollowPolicy.ACCEPT
+        try:
+            decision = self.follow_policy(target_actor_id, requester_actor_id)
+        except Exception:
+            logger.warning(
+                "follow_policy callback failed for %s -> %s; "
+                "marking the request pending",
+                requester_actor_id,
+                target_actor_id,
+                exc_info=True,
+            )
+            return FollowPolicy.MANUAL
+        if decision is None:
+            return FollowPolicy.ACCEPT
+        try:
+            return FollowPolicy(decision)
+        except ValueError:
+            logger.warning(
+                "follow_policy returned unknown value %r; treating as ACCEPT",
+                decision,
+            )
+            return FollowPolicy.ACCEPT
 
     def _handle_undo(self, activity: Activity, _: dict) -> dict | None:
         """Handle an incoming Undo activity."""
@@ -454,6 +544,8 @@ class InboxProcessor:
             target_actor_id = target_actor_id or self.actor_id
 
             self.storage.remove_follower(actor_id, target_actor_id)
+            # A withdrawn request may still be awaiting approval.
+            self.storage.remove_follow_request(actor_id, target_actor_id)
         elif inner_type in ("Like", "Announce") and isinstance(inner, dict):
             self._handle_undo_interaction(activity, inner)
         else:

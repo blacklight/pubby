@@ -3,7 +3,13 @@ from typing import Mapping
 import sqlalchemy as sa
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-from ._model import DbActivity, DbActorCache, DbFollower, DbInteraction
+from ._model import (
+    DbActivity,
+    DbActorCache,
+    DbFollower,
+    DbFollowRequest,
+    DbInteraction,
+)
 from ._storage import DbActivityPubStorage
 
 # Mapping from async SQLAlchemy drivers to their synchronous equivalents.
@@ -60,6 +66,7 @@ def init_db_storage(
     interactions_table: str = "ap_interactions",
     activities_table: str = "ap_activities",
     actor_cache_table: str = "ap_actor_cache",
+    follow_requests_table: str = "ap_follow_requests",
     driver_map: Mapping[str, str] | None = None,
     **kwargs,
 ) -> DbActivityPubStorage:
@@ -77,6 +84,7 @@ def init_db_storage(
     :param interactions_table: Table name for interactions.
     :param activities_table: Table name for activities.
     :param actor_cache_table: Table name for the actor cache.
+    :param follow_requests_table: Table name for pending follow requests.
     :param driver_map: Optional async→sync driver overrides/extensions,
         forwarded to :func:`to_sync_url` when ``engine`` is a string URL.
     :param args: Positional arguments for ``sa.create_engine``.
@@ -97,6 +105,9 @@ def init_db_storage(
     class DefaultDbActorCache(Base, DbActorCache):  # type: ignore
         __tablename__ = actor_cache_table
 
+    class DefaultDbFollowRequest(Base, DbFollowRequest):  # type: ignore
+        __tablename__ = follow_requests_table
+
     if isinstance(engine, str):
         engine = sa.create_engine(to_sync_url(engine, driver_map), *args, **kwargs)
 
@@ -107,5 +118,6 @@ def init_db_storage(
         interaction_model=DefaultDbInteraction,
         activity_model=DefaultDbActivity,
         actor_cache_model=DefaultDbActorCache,
+        follow_request_model=DefaultDbFollowRequest,
         session_factory=sessionmaker(bind=engine),
     )

@@ -36,6 +36,7 @@
   - [Multi-actor Support](#multi-actor-support)
     - [Upgrading from single-actor deployments](#upgrading-from-single-actor-deployments)
     - [Followable objects (thread subscriptions)](#followable-objects-thread-subscriptions)
+    - [Follow approval policies](#follow-approval-policies)
 - [Configuration Reference](#configuration-reference)
   - [`ActivityPubHandler` Parameters](#activitypubhandler-parameters)
   - [`actor_config`](#actor_config)
@@ -690,6 +691,67 @@ subscribers = storage.get_followers_of_targets({root_object_id, parent_object_id
 inboxes = collect_inboxes(subscribers)
 ```
 
+#### Follow approval policies
+
+Incoming `Follow` activities can be auto-accepted, held for manual
+approval, or auto-rejected via the `follow_policy` callback on
+`ActivityPubHandler`/`InboxProcessor`. It is called with
+`(target_actor_id, requester_actor_id)` and returns a `FollowPolicy`
+(or its string value):
+
+- `FollowPolicy.ACCEPT` — store the follower and reply `Accept`
+  (default).
+- `FollowPolicy.MANUAL` — store a pending `FollowRequest` and send no
+  reply; the requester stays "pending" until the application resolves it.
+- `FollowPolicy.REJECT` — reply `Reject`, store nothing.
+
+```python
+from pubby import FollowPolicy
+
+handler = ActivityPubHandler(
+    ...,
+    follow_policy=lambda target, requester: (
+        FollowPolicy.MANUAL if is_locked_account(target) else FollowPolicy.ACCEPT
+    ),
+)
+```
+
+When `follow_policy` is unset and `actor_config.manually_approves_followers`
+is `True`, every follow of that actor is held for manual approval — so the
+advertised `manuallyApprovesFollowers` actor flag is actually enforced.
+A callback that raises resolves to `MANUAL` (fail closed); `None` and
+unknown return values resolve to `ACCEPT`. An `Undo(Follow)` removes both
+the accepted follower and any pending request.
+
+Pending requests are stored through four optional storage methods —
+`store_follow_request`, `get_follow_requests`, `get_follow_request` and
+`remove_follow_request` — implemented by both bundled adapters (the DB
+adapter creates an `ap_follow_requests` table via `init_db_storage`; the
+file adapter uses a `follow_requests/` directory). Backends that do not
+implement them fall back to auto-accept, so custom storages keep working
+unchanged.
+
+Resolve a pending request with `accept_follow_request` or
+`reject_follow_request`; both send the `Accept`/`Reject` embedding the
+original `Follow` through either the built-in signed POST or an
+application-supplied `deliver` callback (e.g. a task queue):
+
+```python
+from pubby import accept_follow_request, reject_follow_request
+
+request = storage.get_follow_request(remote_actor_id, target_actor_id)
+if request:
+    accept_follow_request(
+        storage, request,
+        actor_id=local_actor_id,
+        deliver=lambda inbox, activity: queue_delivery(inbox, activity),
+    )
+```
+
+`accept_follow_request` promotes the request to a stored follower;
+`reject_follow_request` only removes it. Both return the response
+activity that was delivered.
+
 ## Configuration Reference
 
 ### `ActivityPubHandler` Parameters
@@ -716,6 +778,7 @@ inboxes = collect_inboxes(subscribers)
 | `blocked_instances` | `Collection[str]` | `None` | Never federate with these instance domains (block-list) |
 | `deliver` | `Callable[[str, dict], None]` | `None` | Custom delivery callable invoked per inbox (see Custom Delivery) |
 | `strict_attribution` | `bool` | `False` | Reject inbound `Create`/`Update` objects whose `attributedTo` or `id` authority does not match the delivering actor (see Strict Attribution) |
+| `follow_policy` | `Callable[[str, str], FollowPolicy \| str \| None]` | `None` | Per-follow approval policy callback (see Follow approval policies); defaults to `MANUAL` for every target when `manually_approves_followers` is set |
 
 ### `actor_config`
 
@@ -743,7 +806,7 @@ handler = ActivityPubHandler(storage=storage, actor_config=config, ...)
 | `icon_url` | `str` | `""` | Avatar image URL |
 | `actor_path` | `str` | `"/ap/actor"` | URL path to the actor endpoint |
 | `type` | `str` | `"Person"` | ActivityPub actor type (`Person`, `Application`, `Service`) |
-| `manually_approves_followers` | `bool` | `False` | Require explicit follow approval |
+| `manually_approves_followers` | `bool` | `False` | Advertise `manuallyApprovesFollowers` on the actor document and hold incoming `Follow`s for manual approval (see Follow approval policies) |
 | `attachment` | `list[dict]` | `[]` | Profile metadata fields (see below) |
 
 #### Profile Metadata (Verified Links)

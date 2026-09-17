@@ -8,6 +8,7 @@ import pytest
 
 from pubby._model import (
     Follower,
+    FollowRequest,
     Interaction,
     InteractionStatus,
     InteractionType,
@@ -896,3 +897,80 @@ class TestSchemaMigration:
         interactions = storage.get_interactions(target_resource=target)
         assert len(interactions) == 1
         assert interactions[0].content == "Second reply"
+
+
+class TestFollowRequests:
+    def _request(
+        self,
+        actor_id="https://mastodon.social/users/alice",
+        target="https://blog.example.com/ap/actor",
+    ):
+        return FollowRequest(
+            actor_id=actor_id,
+            target_actor_id=target,
+            inbox=f"{actor_id}/inbox",
+            actor_data={"name": "Alice"},
+            activity={"type": "Follow", "actor": actor_id, "object": target},
+            requested_at=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        )
+
+    def test_store_and_get_follow_request(self, storage):
+        storage.store_follow_request(self._request())
+
+        request = storage.get_follow_request(
+            "https://mastodon.social/users/alice",
+            "https://blog.example.com/ap/actor",
+        )
+        assert request is not None
+        assert request.actor_data == {"name": "Alice"}
+        assert request.activity["type"] == "Follow"
+        assert request.requested_at == datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+    def test_get_follow_requests_filtered_by_target(self, storage):
+        storage.store_follow_request(self._request())
+        storage.store_follow_request(
+            self._request(target="https://blog.example.com/objects/1")
+        )
+
+        assert len(storage.get_follow_requests()) == 2
+        by_target = storage.get_follow_requests("https://blog.example.com/ap/actor")
+        assert len(by_target) == 1
+
+    def test_store_follow_request_overwrites(self, storage):
+        storage.store_follow_request(self._request())
+        updated = self._request()
+        updated.inbox = "https://mastodon.social/other-inbox"
+        storage.store_follow_request(updated)
+
+        requests = storage.get_follow_requests()
+        assert len(requests) == 1
+        assert requests[0].inbox == "https://mastodon.social/other-inbox"
+
+    def test_remove_follow_request_scoped(self, storage):
+        storage.store_follow_request(self._request())
+        storage.store_follow_request(
+            self._request(target="https://blog.example.com/objects/1")
+        )
+
+        assert storage.remove_follow_request(
+            "https://mastodon.social/users/alice",
+            "https://blog.example.com/ap/actor",
+        )
+        remaining = storage.get_follow_requests()
+        assert len(remaining) == 1
+        assert remaining[0].target_actor_id == "https://blog.example.com/objects/1"
+
+    def test_remove_follow_request_all(self, storage):
+        storage.store_follow_request(self._request())
+        storage.store_follow_request(
+            self._request(target="https://blog.example.com/objects/1")
+        )
+
+        assert storage.remove_follow_request("https://mastodon.social/users/alice")
+        assert storage.get_follow_requests() == []
+
+    def test_remove_follow_request_miss_returns_false(self, storage):
+        assert not storage.remove_follow_request(
+            "https://mastodon.social/users/nobody",
+            "https://blog.example.com/ap/actor",
+        )

@@ -3,6 +3,7 @@ from ._model import (
     DbActivity,
     DbActorCache,
     DbFollower,
+    DbFollowRequest,
     DbInteraction,
     DbInteractionMention,
 )
@@ -13,6 +14,7 @@ __all__ = [
     "DbActivityPubStorage",
     "DbActorCache",
     "DbFollower",
+    "DbFollowRequest",
     "DbInteraction",
     "DbInteractionMention",
     "DEFAULT_ASYNC_DRIVER_MAP",
