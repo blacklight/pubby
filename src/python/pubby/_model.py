@@ -164,7 +164,6 @@ AS_PUBLIC = "https://www.w3.org/ns/activitystreams#Public"
 AP_CONTEXT = [
     "https://www.w3.org/ns/activitystreams",
     "https://w3id.org/security/v1",
-    "https://w3id.org/fep/0449",
     {
         "schema": "http://schema.org#",
         "PropertyValue": "schema:PropertyValue",

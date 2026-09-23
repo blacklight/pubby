@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- Removed dead JSON-LD spec (https://w3id.org/fep/0449).
+
 ## 0.3.9
 
 ### Added
