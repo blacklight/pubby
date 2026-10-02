@@ -58,6 +58,7 @@ src/python/pubby/
 ├── _model.py                # Core data model (dataclasses + enums)
 ├── _exceptions.py           # Exception hierarchy
 ├── _rate_limit.py           # In-memory sliding-window rate limiter
+├── cache.py                 # TTL document cache + single-flight coalescing
 ├── audience.py              # Audience/Mention parsing helpers
 ├── quotes.py                # Quote field/policy helpers (FEP-0449, FEP-044f)
 ├── attribution.py           # Inbound object attribution validation
@@ -161,7 +162,61 @@ A simple hierarchy rooted at `ActivityPubError`:
 limiter.  Server adapters optionally pass it to the inbox endpoint; the
 `check(key)` method raises `RateLimitError` when the window is exceeded.
 
-### 4. Instance Moderation — `pubby.moderation`
+### 4. Document Cache — `pubby.cache`
+
+Short-TTL document cache with single-flight request coalescing, built for
+the federation "stampede" pattern: when a post is boosted, hundreds of
+remote instances dereference the same actor/object/collection URLs at once.
+
+- `DocumentCache` — the façade. `get_or_render` (sync, `Future`-based,
+  waiters bounded by `wait_timeout`) and `get_or_render_async`
+  (per-event-loop inflight tasks, shielded so a cancelled waiter cannot
+  cancel the shared render). `None` results are cached for at most
+  `miss_ttl`; exceptions propagate to every waiter and are never stored.
+  A generation counter is bumped by every invalidation so a render that
+  completes after an invalidation landed does not re-populate stale
+  data. `stale_factor` retains expired entries briefly and serves them
+  when the re-render fails (stale-if-error). `ttl_remaining(key)` returns
+  an entry's remaining fresh TTL so adapters emit honest `max-age`.
+  Store failures are contained: a `get` error counts as a miss, a `set`
+  error skips the write, invalidation errors are logged — a broken Redis
+  degrades to uncached renders instead of 500s. The async store
+  done-callback holds the cache lock across the generation check and the
+  write, so a threaded invalidation cannot be overwritten by a stale
+  result.
+- `DocumentStore` — pluggable backend. `InMemoryDocumentStore` is a
+  bounded LRU (`max_entries`, default 10k — requester-chosen keys must be
+  bounded); `RedisDocumentStore` wraps a redis-py-compatible client and
+  shares entries/invalidations across processes. Note the Redis backend
+  is synchronous: calls block the calling thread, including on the event
+  loop in the async path — for latency-sensitive async servers, run the
+  cache behind a thread or keep `InMemoryDocumentStore`. Its distributed
+  guarantee is weaker than the in-process one: generation counters are
+  per `DocumentCache` instance, so a render already in flight in another
+  process can still repopulate a deleted entry (documented in the
+  class's docstring).
+- `CachedResponse` — immutable serialized response fragment (status,
+  body bytes, media type, headers, precomputed ETag) adapters serve
+  verbatim; `cache_headers`/`etag_matches` emit `Cache-Control`,
+  `Vary: Accept` and answer `If-None-Match` with `304`. `cache_headers`
+  separates representation headers (`Vary`, `ETag` — always emitted) from
+  freshness policy: exhausted freshness on an enabled cache maps to
+  `max-age=0, must-revalidate`, a disabled cache to `no-store`.
+- Key builders (`actor_document_key`, `webfinger_key`, `outbox_key`,
+  `followers_key`, `following_key`, `nodeinfo_key`,
+  `nodeinfo_discovery_key`, `quote_authorization_key`) return tuples so
+  `invalidate_prefix`/`invalidate_segment` match element-wise and cannot
+  collide the way flat `a:b:c` strings can. All built-in route keys live
+  under the `("pubby", …)` namespace (`route_key`), so an application
+  sharing one `DocumentCache` with pubby's adapter routes cannot have its
+  own keys touched by pubby-side invalidation (and vice versa).
+
+Invalidation is best-effort and wired into the handler: actor updates drop
+actor/webfinger/collection entries, publishing drops outbox/nodeinfo,
+follower mutations drop followers entries. TTL bounds residual staleness;
+writes inside a transaction should invalidate after commit.
+
+### 5. Instance Moderation — `pubby.moderation`
 
 Stdlib-only helpers for per-instance allow/block policy.  The application
 owns the lists (`allowed_instances` / `blocked_instances` on
@@ -181,7 +236,7 @@ matches domains and enforces the policy at two seams:
 | `extract_domain(url_or_actor)` | Hostname of an actor URL, inbox URL, or bare domain |
 | `is_domain_blocked(domain, allowed=None, blocked=None)` | `True` when blocked, or a non-empty allow-list excludes the domain (blocked wins over allowed) |
 
-### 5. Audience Helpers — `pubby.audience`
+### 6. Audience Helpers — `pubby.audience`
 
 Pure, stdlib-only parsers for ActivityPub addressing, shared by
 `InboxProcessor` and available to applications:
@@ -197,7 +252,7 @@ and `as:Public` shorthand aliases. The helpers inspect only the mapping
 they are given — they never descend into an activity's embedded
 `object` — and tolerate missing or malformed fields without raising.
 
-### 6. Attribution Validation — `pubby.attribution`
+### 7. Attribution Validation — `pubby.attribution`
 
 `validate(actor, obj)` sanity-checks that an inbound object can plausibly
 belong to the actor that signed the delivery: a non-empty `attributedTo`
@@ -212,7 +267,7 @@ logged and dropped before any callback or storage mutation. Kept opt-in
 because relays, proxies, and account migration can legitimately separate
 actor and object hosts.
 
-### 7. Crypto — `pubby.crypto`
+### 8. Crypto — `pubby.crypto`
 
 Two internal modules, re-exported through `pubby.crypto.__init__`:
 
@@ -231,9 +286,9 @@ with RSA-SHA256.  `sign_request()` returns a dict of headers (`Date`,
 `verify_request()` reconstructs the signing string, verifies the RSA
 signature, and optionally checks the `Digest` header.
 
-### 8. Handlers — `pubby.handlers`
+### 9. Handlers — `pubby.handlers`
 
-#### 8.1 `ActivityPubHandler` (façade)
+#### 9.1 `ActivityPubHandler` (façade)
 
 The single entry point consumers interact with.  Accepts an
 `ActivityPubStorage`, an `ActorConfig` (or dict), and a private key.
@@ -262,7 +317,7 @@ Public methods:
 | `render_interaction(interaction)` | Render a single interaction as HTML. |
 | `render_interactions(interactions)` | Render a list of interactions as HTML. |
 
-#### 8.2 `InboxProcessor`
+#### 9.2 `InboxProcessor`
 
 Dispatches incoming activities by type via a handler map:
 
@@ -321,7 +376,7 @@ module-level `build_quote_authorization()` helper from
 `pubby.handlers._outbox` and returns an `Accept` activity sharing the
 `pubby.quotes.FEP_044F_CONTEXT` JSON-LD context.
 
-#### 8.3 `OutboxProcessor`
+#### 9.3 `OutboxProcessor`
 
 Responsible for:
 
@@ -363,17 +418,17 @@ Responsible for:
    (`retry_base_delay × 2^attempt`); 5xx responses and connection errors
    are retried, 4xx errors are not.
 
-#### 8.4 `_discovery`
+#### 9.4 `_discovery`
 
 Pure functions that build WebFinger JRD (RFC 7033) and NodeInfo 2.1
 response dicts.
 
-#### 8.5 `_client`
+#### 9.5 `_client`
 
 `get_default_user_agent(actor_id)` returns the default `User-Agent` string
 (`pubby/{version} (+{actor_id})`).
 
-#### 8.6 `pubby.client`
+#### 9.6 `pubby.client`
 
 One-off actor/inbox resolution for applications that build their own
 delivery pipeline:
@@ -386,7 +441,7 @@ delivery pipeline:
   using the actor cache and an optional signed HTTP GET, with
   allow/block domain filtering.
 
-### 9. WebFinger Client — `pubby.webfinger`
+### 10. WebFinger Client — `pubby.webfinger`
 
 - **`resolve_actor_url(username, domain)`** — performs a WebFinger lookup
   and returns the `self` link, falling back to
@@ -396,9 +451,9 @@ delivery pipeline:
 - **`Mention`** dataclass — carries `username`, `domain`, `actor_url`,
   plus helpers `acct` (property) and `to_tag()` (→ AP Mention tag dict).
 
-### 10. Storage — `pubby.storage`
+### 11. Storage — `pubby.storage`
 
-#### 10.1 Abstract Base — `ActivityPubStorage`
+#### 11.1 Abstract Base — `ActivityPubStorage`
 
 Defines the contract every storage backend must fulfill:
 
@@ -424,7 +479,7 @@ named for the given targets.  On backends without follow-request
 support, a `MANUAL` policy falls back to the historical auto-accept
 behavior.
 
-#### 10.2 SQLAlchemy Adapter — `pubby.storage.adapters.db`
+#### 11.2 SQLAlchemy Adapter — `pubby.storage.adapters.db`
 
 - **Mixin models** (`_model.py`): `DbFollower`, `DbInteraction`,
   `DbActivity`, `DbActorCache`, `DbFollowRequest` — framework-neutral
@@ -451,7 +506,7 @@ behavior.
   `postgresql+asyncpg` → `postgresql+psycopg2`).  Already-sync URLs pass
   through unchanged; unknown async drivers raise `ValueError`.
 
-#### 10.3 File Adapter — `pubby.storage.adapters.file`
+#### 11.3 File Adapter — `pubby.storage.adapters.file`
 
 `FileActivityPubStorage` stores entities as individual JSON files in a
 directory tree:
@@ -488,7 +543,7 @@ automatically runs any pending migrations (e.g., rebuilding indexes).
 Pass `auto_migrate=False` to disable.  The current schema version is 4,
 which adds `target_actor_id` to follower records.
 
-### 11. Render — `pubby.render`
+### 12. Render — `pubby.render`
 
 `InteractionsRenderer` uses Jinja2 (`PackageLoader` on the `templates/`
 directory) to produce safe HTML `Markup` for interactions.
@@ -506,7 +561,7 @@ HTML sanitization (`_sanitize_html`) strips disallowed tags and attributes
 via regex, permitting a safe subset (links, basic formatting,
 blockquotes, lists) and only `http`/`https` href schemes.
 
-### 12. Content Rendering — `pubby.content`
+### 13. Content Rendering — `pubby.content`
 
 A stdlib-only module that produces outbound ActivityPub HTML from local plain
 text.  It is intentionally independent of `pubby.render` (which sanitises
@@ -534,7 +589,7 @@ validated `http`/`https` URLs.
 - **`property_value_attachment(name, url, label=None)`** — builds a
   `PropertyValue` dict suitable for `ActorConfig.attachment`.
 
-### 13. Server Adapters — `pubby.server.adapters`
+### 14. Server Adapters — `pubby.server.adapters`
 
 Each framework gets two modules:
 
@@ -562,15 +617,24 @@ All `bind_activitypub()` functions register the same set of routes:
 | `GET` | `{actor_path}/quote_authorizations/{id}` | `get_quote_authorization()` |
 
 The `prefix` (default `/ap`) is configurable.  The inbox route
-optionally applies the `RateLimiter`.
+optionally applies the `RateLimiter` (bucketed by `rate_limit_key` when
+provided — e.g. a trusted-proxy-aware client resolver — otherwise the
+client IP).  When a `document_cache` is passed (or set on the handler),
+every dereference GET route is served through it: single-flight
+coalescing, `Cache-Control`/`Vary: Accept`/`ETag` emission, and
+`If-None-Match` → `304`.  A cache passed only to `bind_activitypub` is
+also assigned to the handler so mutations invalidate the same entries.
+WebFinger resources are validated (`is_valid_webfinger_resource`)
+before cache lookup, so malformed requests are rejected uncached;
+NodeInfo routes serve `application/json`.
 
-### 14. Mastodon-Compatible API — `pubby.server.mastodon`
+### 15. Mastodon-Compatible API — `pubby.server.mastodon`
 
 A read-only subset of the
 [Mastodon REST API](https://docs.joinmastodon.org/methods/) so that
 Mastodon clients and crawlers can discover the instance.
 
-#### 14.1 Mappers (`_mappers.py`)
+#### 15.1 Mappers (`_mappers.py`)
 
 Pure functions that convert Pubby/AP types to Mastodon JSON shapes:
 
@@ -582,7 +646,7 @@ Pure functions that convert Pubby/AP types to Mastodon JSON shapes:
 | `tag_to_mastodon_tag()` | Hashtag → Mastodon Tag |
 | `stable_id()` / `id_to_url()` | Deterministic, reversible URL-safe base64 IDs |
 
-#### 14.2 Route Handlers (`_routes.py`)
+#### 15.2 Route Handlers (`_routes.py`)
 
 `MastodonAPI` is a stateless class whose methods return
 `(body, status_code)` tuples.  Framework adapters call these methods and
@@ -603,7 +667,7 @@ The framework-specific `bind_mastodon_api()` adapters also register
 NodeInfo 2.0 aliases (`/nodeinfo/2.0`, `/nodeinfo/2.0.json`,
 `/nodeinfo/2.1.json`).
 
-### 15. Quote Helpers — `pubby.quotes`
+### 16. Quote Helpers — `pubby.quotes`
 
 Pure, stdlib-only helpers for the quote fields defined by
 [FEP-0449](https://codeberg.org/fediverse/fep/src/branch/main/fep/0449/fep-0449.md)

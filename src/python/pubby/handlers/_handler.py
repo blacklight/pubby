@@ -6,7 +6,7 @@ import logging
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Collection
+from typing import Callable, Collection, Dict, List, Optional, Union
 
 from cryptography.hazmat.primitives.asymmetric import rsa
 from jinja2 import Template
@@ -20,6 +20,7 @@ from .._model import (
     Object,
     AP_CONTEXT,
 )
+from .. import cache as _cache
 from ..crypto._keys import load_private_key, export_public_key_pem
 from ..render import InteractionsRenderer
 from ..storage import ActivityPubStorage
@@ -97,34 +98,45 @@ class ActivityPubHandler:
         every local target defaults to :attr:`FollowPolicy.MANUAL` so the
         advertised ``manuallyApprovesFollowers`` flag is actually
         enforced.
+    :param document_cache: Optional :class:`pubby.cache.DocumentCache`
+        used by the framework adapters for dereference endpoints. The
+        handler only needs it to invalidate the actor, WebFinger and
+        collection entries when local state changes (actor updates,
+        published activities, followers gained or lost). Adapters fall
+        back to this attribute when ``bind_activitypub`` receives no
+        explicit cache.
     """
 
     def __init__(
         self,
         storage: ActivityPubStorage,
-        actor_config: ActorConfig | dict,
+        actor_config: Union[ActorConfig, dict],
         *,
-        private_key: rsa.RSAPrivateKey | str | bytes | None = None,
-        private_key_path: str | Path | None = None,
-        on_interaction_received: Callable[[Interaction], None] | None = None,
-        webfinger_domain: str | None = None,
-        user_agent: str | None = None,
+        private_key: Optional[Union[rsa.RSAPrivateKey, str, bytes]] = None,
+        private_key_path: Optional[Union[str, Path]] = None,
+        on_interaction_received: Optional[Callable[[Interaction], None]] = None,
+        webfinger_domain: Optional[str] = None,
+        user_agent: Optional[str] = None,
         http_timeout: float = 15.0,
         max_retries: int = 3,
         max_delivery_workers: int = 10,
         auto_approve_quotes: bool = True,
         store_local_only: bool = False,
-        local_base_urls: list[str] | None = None,
+        local_base_urls: Optional[List[str]] = None,
         software_name: str = "pubby",
-        software_version: str | None = None,
+        software_version: Optional[str] = None,
         async_delivery: bool = True,
-        allowed_instances: Collection[str] | None = None,
-        blocked_instances: Collection[str] | None = None,
-        deliver: Callable[[str, dict], None] | None = None,
+        allowed_instances: Optional[Collection[str]] = None,
+        blocked_instances: Optional[Collection[str]] = None,
+        deliver: Optional[Callable[[str, dict], None]] = None,
         strict_attribution: bool = False,
-        follow_policy: Callable[[str, str], FollowPolicy | str | None] | None = None,
+        follow_policy: Optional[
+            Callable[[str, str], Optional[Union[FollowPolicy, str]]]
+        ] = None,
+        document_cache: Optional[_cache.DocumentCache] = None,
     ):
         self.storage = storage
+        self.document_cache = document_cache  # property: propagates to processors
 
         # Accept dict or ActorConfig
         if isinstance(actor_config, dict):
@@ -200,6 +212,7 @@ class ActivityPubHandler:
                     (lambda *_: FollowPolicy.MANUAL) if self.manually_approves else None
                 )
             ),
+            document_cache=document_cache,
         )
 
         self.outbox = OutboxProcessor(
@@ -216,9 +229,31 @@ class ActivityPubHandler:
             allowed_instances=allowed_instances,
             blocked_instances=blocked_instances,
             deliver=deliver,
+            document_cache=document_cache,
         )
 
         self.renderer = InteractionsRenderer()
+
+    @property
+    def document_cache(self) -> Optional[_cache.DocumentCache]:
+        return self._document_cache
+
+    @document_cache.setter
+    def document_cache(self, cache: Optional[_cache.DocumentCache]) -> None:
+        self._document_cache = cache
+        # Propagate to the sub-processors so mutations they handle (incoming
+        # follows/unfollows, published activities) invalidate the adapter's
+        # cached documents — e.g. when the cache is attached through
+        # ``bind_activitypub`` after the handler was constructed.
+        for proc in (getattr(self, "inbox", None), getattr(self, "outbox", None)):
+            if proc is not None:
+                proc.document_cache = cache
+
+    def _invalidate_cached_documents(self, *prefixes) -> None:
+        """Drop cached dereference documents when local state changes."""
+        cache = self.document_cache
+        if cache is not None:
+            cache.invalidate_prefix(*prefixes)
 
     # ---------- Inbox ----------
 
@@ -227,10 +262,10 @@ class ActivityPubHandler:
         activity_data: dict,
         method: str = "POST",
         path: str = "/ap/inbox",
-        headers: dict[str, str] | None = None,
-        body: bytes | None = None,
+        headers: Optional[Dict[str, str]] = None,
+        body: Optional[bytes] = None,
         skip_verification: bool = False,
-    ) -> dict | None:
+    ) -> Optional[dict]:
         """
         Process an incoming activity on the inbox.
 
@@ -331,7 +366,7 @@ class ActivityPubHandler:
 
         return actor.to_dict()
 
-    def publish_actor_update(self, document: dict | None = None) -> dict:
+    def publish_actor_update(self, document: Optional[dict] = None) -> dict:
         """
         Publish an ``Update`` activity for the actor itself.
 
@@ -347,6 +382,16 @@ class ActivityPubHandler:
         :return: The published activity dictionary.
         """
         actor_doc = document if document is not None else self.get_actor_document()
+        # The actor document and everything derived from it (WebFinger
+        # lookup, collection memberships) changed — drop cached copies so
+        # the next dereference renders the updated profile.
+        self._invalidate_cached_documents(
+            _cache.actor_document_key(),
+            _cache.route_key("webfinger"),
+            _cache.route_key("outbox"),
+            _cache.followers_key(),
+            _cache.following_key(),
+        )
         activity = {
             "@context": AP_CONTEXT,
             "id": f"{self.actor_id}#update-profile-{uuid.uuid4()}",
@@ -364,7 +409,7 @@ class ActivityPubHandler:
 
     def get_followers_collection(
         self,
-        actor_id: str | None = None,
+        actor_id: Optional[str] = None,
     ) -> dict:
         """
         Build the followers OrderedCollection.
@@ -405,7 +450,30 @@ class ActivityPubHandler:
 
     # ---------- Discovery ----------
 
-    def get_webfinger_response(self, resource: str | None = None) -> dict | None:
+    def is_valid_webfinger_resource(self, resource: Optional[str]) -> bool:
+        """
+        Whether ``resource`` is a spelling of this actor's ``acct:`` URI
+        that :meth:`get_webfinger_response` accepts.
+
+        Accepted: ``acct:user@domain`` and ``acct:@user@domain``
+        (case-insensitive). Rejected: bare ``user@domain``, a leading ``@``
+        without the ``acct:`` scheme, surrounding whitespace — anything the
+        renderer would treat differently from the canonical form. Adapters
+        call this *before* cache lookup so a malformed request cannot
+        negative-cache the valid account's entry under the same key.
+        """
+        if resource is None:
+            return True
+        normalized = resource
+        if not normalized.lower().startswith("acct:"):
+            return False
+        normalized = normalized[5:]
+        if normalized.startswith("@"):
+            normalized = normalized[1:]
+        expected = f"{self.username}@{self.webfinger_domain}"
+        return normalized.lower() == expected.lower()
+
+    def get_webfinger_response(self, resource: Optional[str] = None) -> Optional[dict]:
         """
         Build the WebFinger response for the configured actor.
 
@@ -413,17 +481,8 @@ class ActivityPubHandler:
             validates that it matches the configured actor.
         :return: The JRD response or None if the resource doesn't match.
         """
-        expected = f"acct:{self.username}@{self.webfinger_domain}"
-
-        if resource is not None:
-            # Some clients incorrectly include a leading '@' in the acct user
-            # part (e.g. 'acct:@user@example.com'). Accept both forms.
-            normalized = resource
-            if normalized.lower().startswith("acct:@"):
-                normalized = "acct:" + normalized[6:]
-
-            if normalized.lower() != expected.lower():
-                return None
+        if resource is not None and not self.is_valid_webfinger_resource(resource):
+            return None
 
         return build_webfinger_response(
             username=self.username,
@@ -454,7 +513,7 @@ class ActivityPubHandler:
 
     # ---------- Quote authorizations ----------
 
-    def get_quote_authorization(self, authorization_id: str) -> dict | None:
+    def get_quote_authorization(self, authorization_id: str) -> Optional[dict]:
         """
         Retrieve a stored QuoteAuthorization by its full ID/URL.
 
@@ -468,7 +527,7 @@ class ActivityPubHandler:
     def render_interaction(
         self,
         interaction: Interaction,
-        template: str | Path | Template | None = None,
+        template: Optional[Union[str, Path, Template]] = None,
     ) -> Markup:
         """
         Render a single interaction as HTML.
@@ -482,7 +541,7 @@ class ActivityPubHandler:
     def render_interactions(
         self,
         interactions: Collection[Interaction],
-        template: str | Path | Template | None = None,
+        template: Optional[Union[str, Path, Template]] = None,
     ) -> Markup:
         """
         Render a list of interactions as HTML.

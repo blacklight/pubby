@@ -2,6 +2,99 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `pubby.cache`: `DocumentCache` — a short-TTL dereference-document cache
+  with single-flight request coalescing (`get_or_render` for threads,
+  `get_or_render_async` for asyncio). When a post is boosted, hundreds of
+  remote instances dereference the same actor/object/collection URLs at
+  once; the cache folds concurrent fetches of a key into one render,
+  caches `None` misses briefly, serves slightly expired entries when a
+  re-render fails (`stale_factor`, stale-if-error) and guarantees an
+  invalidation landing mid-render is not re-populated by stale data
+  (generation guard). Cache keys are tuples — prefix/segment invalidation
+  is element-exact, unlike flat `a:b:c` strings.
+- `DocumentStore` backends for `DocumentCache`: `InMemoryDocumentStore`
+  (bounded LRU + TTL, default) and `RedisDocumentStore` (duck-typed
+  redis-py client — shares entries and therefore invalidations across
+  processes).
+- `CachedResponse` (immutable serialized response fragment with
+  precomputed ETag) and the `cache_headers`/`etag_matches` HTTP helpers
+  (`Cache-Control`, `Vary: Accept`, `ETag`, `If-None-Match` → `304`).
+- `document_cache` parameter on `ActivityPubHandler` (forwarded to the
+  inbox/outbox processors and `accept_follow_request`) and on
+  `bind_activitypub` in the Flask, FastAPI and Tornado adapters. With a
+  cache configured, all dereference GET routes (actor, WebFinger,
+  NodeInfo, outbox, followers, following, quote authorizations) are
+  cached and coalesced; local mutations — `publish_actor_update`,
+  published activities, follower add/remove, accepted follow requests —
+  invalidate the corresponding entries. A cache passed to
+  `bind_activitypub` is also assigned to the handler when it has none.
+- `rate_limit_key` parameter on `bind_activitypub`: a callable mapping
+  the incoming request to the rate-limit bucket key, for deployments
+  behind a reverse proxy where the client IP is the proxy's.
+- `init_db_storage(..., create_tables=False)` to skip
+  `Base.metadata.create_all` when tables are managed by the
+  application's own migrations, plus memoized `get_db_storage()` /
+  `reset_db_storage()` helpers — each `init_db_storage` call creates an
+  engine with its own connection pool, so calling it per request leaks
+  pools until the database refuses connections.
+- `DocumentCache.ttl_remaining(key)` — remaining fresh TTL of a cached
+  entry. The adapters emit it as `max-age` on cache hits so a cached
+  response does not restart the TTL clock downstream.
+- `DocumentCache(wait_timeout=…)` — bound for sync-path waiters (default
+  30 s); on timeout a waiter falls back to stale data or the owner's
+  error instead of blocking indefinitely.
+- `ActivityPubHandler.is_valid_webfinger_resource()` — the WebFinger
+  resource validation the adapters now run *before* cache lookup, so a
+  malformed `resource` (bare `user@domain`, leading `@` without `acct:`,
+  whitespace) is rejected uncached and cannot negative-cache the valid
+  account's entry under the same key.
+- `cache_headers(..., stale=…)` — explicit freshness policy when no
+  freshness remains: `max-age=0, must-revalidate` for a stale or
+  otherwise not provably fresh representation, `no-store` when caching is
+  disabled. `Vary` and `ETag` are always emitted so a `304` keeps its
+  validator and downstream caches keep negotiating variants.
+
+### Changed
+
+- `ActivityPubHandler.document_cache` is now a property whose setter
+  propagates the cache to the inbox/outbox processors — a cache attached
+  after construction (e.g. only to `bind_activitypub`) is honored by
+  handler-side invalidation.
+- Built-in route cache keys are namespaced under `("pubby", …)`
+  (`route_key`), so a `DocumentCache` shared between pubby's adapter
+  routes and application code cannot mix value types or cross-invalidate.
+- `DocumentCache` contains store failures: a backend `get` error counts
+  as a miss, a `set` error skips the write, invalidation errors are
+  logged — a broken Redis degrades to uncached renders instead of
+  failing requests.
+- The async store done-callback holds the cache lock across the
+  generation check and the store write, mirroring the sync path: a
+  threaded invalidation can no longer slip in between the two and be
+  overwritten by the stale result.
+- NodeInfo discovery/document routes serve `application/json` again
+  instead of the ActivityStreams media type the shared serving helpers
+  defaulted to.
+- `RedisDocumentStore` documents its weaker distributed guarantee: a
+  shared store shares completed invalidations, but generation counters
+  are per cache instance, so an in-flight render in another process can
+  still repopulate a deleted entry.
+- `requires-python` is now `>= 3.10` (the codebase already uses PEP 604
+  union syntax at runtime).
+
+### Fixed
+
+- Sync `get_or_render` re-checks entry freshness while holding the
+  single-flight lock — a caller arriving just as the owner's render lands
+  no longer renders the same key twice.
+- Sync-path owner error handling catches `Exception` instead of
+  `BaseException`, so `KeyboardInterrupt`/`SystemExit` are no longer
+  swallowed by the stale-if-error fallback.
+- Removed dead `_wants_activity_json` helper from the Flask adapter.
+
 ## 0.3.10
 
 ### Fixed

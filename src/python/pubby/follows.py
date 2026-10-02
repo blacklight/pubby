@@ -11,13 +11,17 @@ deliver the matching ``Accept``/``Reject`` activity to the requester.
 
 import logging
 import uuid
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from cryptography.hazmat.primitives.asymmetric import rsa
 
+from . import cache as _cache
 from ._model import AP_CONTEXT, Follower, FollowRequest
 from .handlers._outbox import deliver_activity
 from .storage import ActivityPubStorage
+
+if TYPE_CHECKING:
+    from .cache import DocumentCache
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +98,7 @@ def accept_follow_request(
     private_key: rsa.RSAPrivateKey | None = None,
     user_agent: str | None = None,
     timeout: float = 15.0,
+    document_cache: "DocumentCache | None" = None,
 ) -> dict:
     """
     Approve a pending follow request.
@@ -114,6 +119,9 @@ def accept_follow_request(
     :param user_agent: Optional ``User-Agent`` for the synchronous
         delivery.
     :param timeout: Timeout for the synchronous delivery.
+    :param document_cache: Optional :class:`pubby.cache.DocumentCache`
+        whose followers-collection entries are invalidated now that the
+        request became an accepted follower.
     :return: The delivered ``Accept`` activity.
     """
     follower = Follower(
@@ -126,6 +134,8 @@ def accept_follow_request(
     )
     storage.store_follower(follower)
     storage.remove_follow_request(request.actor_id, request.target_actor_id)
+    if document_cache is not None:
+        document_cache.invalidate_prefix(_cache.followers_key())
 
     activity = build_follow_response(actor_id, request.activity, "Accept")
     _deliver_response(

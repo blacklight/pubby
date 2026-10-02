@@ -9,7 +9,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
-from typing import Any, Callable, Collection
+from typing import TYPE_CHECKING, Any, Callable, Collection
 
 import requests
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -20,11 +20,15 @@ from .._model import (
     Follower,
     Object,
 )
+from .. import cache as _cache
 from ..crypto import sign_request
 from ..moderation import is_domain_blocked
 from ..quotes import FEP_044F_CONTEXT
 from ..storage import ActivityPubStorage
 from ._client import get_default_user_agent
+
+if TYPE_CHECKING:
+    from ..cache import DocumentCache
 
 logger = logging.getLogger(__name__)
 
@@ -587,10 +591,12 @@ class OutboxProcessor:
         allowed_instances: Collection[str] | None = None,
         blocked_instances: Collection[str] | None = None,
         deliver: Callable[[str, dict], None] | None = None,
+        document_cache: "DocumentCache | None" = None,
         **_,
     ):
         self.storage = storage
         self.actor_id = actor_id
+        self.document_cache = document_cache
         self.private_key = private_key
         self.key_id = key_id
         self.followers_collection_url = followers_collection_url
@@ -797,6 +803,11 @@ class OutboxProcessor:
         """
         activity_id = activity.get("id", self._new_activity_id())
         self.storage.store_activity(activity_id, activity)
+        # The outbox collection and the NodeInfo post count changed — drop
+        # cached copies so dereferences render the new state.
+        cache = self.document_cache
+        if cache is not None:
+            cache.invalidate_prefix(_cache.route_key("outbox"), _cache.nodeinfo_key())
 
         # Check if this activity is addressed to followers
         # (i.e., followers URL appears in to or cc)

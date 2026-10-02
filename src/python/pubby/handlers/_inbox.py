@@ -5,7 +5,7 @@ Inbox processing — dispatch incoming activities by type.
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import Callable, Collection
+from typing import TYPE_CHECKING, Callable, Collection, Dict, List, Optional, Union
 from urllib.parse import urlparse
 
 import requests
@@ -28,6 +28,7 @@ from .._exceptions import (
     AttributionMismatch,
     SignatureVerificationError,
 )
+from .. import cache as _cache
 from ..attribution import validate as _validate_attribution
 from ..audience import is_public, mentioned_actors
 from ..crypto import sign_request, verify_request
@@ -37,6 +38,9 @@ from ..quotes import FEP_044F_CONTEXT, extract_quote_target
 from ..storage import ActivityPubStorage
 from ._client import get_default_user_agent
 from ._outbox import build_quote_authorization
+
+if TYPE_CHECKING:
+    from ..cache import DocumentCache
 
 logger = logging.getLogger(__name__)
 
@@ -93,19 +97,23 @@ class InboxProcessor:
         private_key: object,
         key_id: str,
         *,
-        on_interaction_received: Callable[[Interaction], None] | None = None,
-        user_agent: str | None = None,
+        on_interaction_received: Optional[Callable[[Interaction], None]] = None,
+        user_agent: Optional[str] = None,
         http_timeout: float = 15.0,
         auto_approve_quotes: bool = True,
         store_local_only: bool = False,
-        local_base_urls: list[str] | None = None,
-        allowed_instances: Collection[str] | None = None,
-        blocked_instances: Collection[str] | None = None,
+        local_base_urls: Optional[List[str]] = None,
+        allowed_instances: Optional[Collection[str]] = None,
+        blocked_instances: Optional[Collection[str]] = None,
         strict_attribution: bool = False,
-        follow_policy: Callable[[str, str], FollowPolicy | str | None] | None = None,
+        follow_policy: Optional[
+            Callable[[str, str], Optional[Union[FollowPolicy, str]]]
+        ] = None,
+        document_cache: Optional["DocumentCache"] = None,
     ):
         self.storage = storage
         self.actor_id = actor_id
+        self.document_cache = document_cache
         self.private_key = private_key
         self.key_id = key_id
         self.on_interaction_received = on_interaction_received
@@ -118,6 +126,12 @@ class InboxProcessor:
         self.blocked_instances = blocked_instances
         self.strict_attribution = strict_attribution
         self.follow_policy = follow_policy
+
+    def _invalidate_cached_documents(self, *prefixes) -> None:
+        """Drop cached dereference documents when followers change."""
+        cache = self.document_cache
+        if cache is not None:
+            cache.invalidate_prefix(*prefixes)
 
     def _is_local_target(self, target_resource: str) -> bool:
         """Check if target_resource is considered local."""
@@ -153,7 +167,7 @@ class InboxProcessor:
             return True
         return self._is_local_target(target_resource) or mentions_actor
 
-    def _fetch_actor(self, actor_id: str) -> dict | None:
+    def _fetch_actor(self, actor_id: str) -> Optional[dict]:
         """Fetch a remote actor document, using cache if available."""
         cached = self.storage.get_cached_actor(actor_id)
         if cached is not None:
@@ -199,8 +213,8 @@ class InboxProcessor:
         method: str,
         path: str,
         headers: dict[str, str],
-        body: bytes | None = None,
-        expected_actor: str | None = None,
+        body: Optional[bytes] = None,
+        expected_actor: Optional[str] = None,
     ) -> str:
         """
         Verify the HTTP signature on an incoming request.
@@ -298,10 +312,10 @@ class InboxProcessor:
         activity_data: dict,
         method: str = "POST",
         path: str = "/ap/inbox",
-        headers: dict[str, str] | None = None,
-        body: bytes | None = None,
+        headers: Optional[Dict[str, str]] = None,
+        body: Optional[bytes] = None,
         skip_verification: bool = False,
-    ) -> dict | None:
+    ) -> Optional[dict]:
         """
         Process an incoming activity.
 
@@ -380,7 +394,7 @@ class InboxProcessor:
 
         return handler(activity, activity_data)
 
-    def _handle_follow(self, activity: Activity, raw: dict) -> dict | None:
+    def _handle_follow(self, activity: Activity, raw: dict) -> Optional[dict]:
         """Handle an incoming Follow activity."""
         actor_id = activity.actor
         logger.info("Processing Follow from %s", actor_id)
@@ -471,6 +485,7 @@ class InboxProcessor:
             target_actor_id=target_actor_id,
         )
         self.storage.store_follower(follower)
+        self._invalidate_cached_documents(_cache.followers_key())
 
         # Send Accept back
         accept_activity = {
@@ -519,7 +534,7 @@ class InboxProcessor:
             )
             return FollowPolicy.ACCEPT
 
-    def _handle_undo(self, activity: Activity, _: dict) -> dict | None:
+    def _handle_undo(self, activity: Activity, _: dict) -> Optional[dict]:
         """Handle an incoming Undo activity."""
         inner = activity.object
         if isinstance(inner, dict):
@@ -544,6 +559,7 @@ class InboxProcessor:
             target_actor_id = target_actor_id or self.actor_id
 
             self.storage.remove_follower(actor_id, target_actor_id)
+            self._invalidate_cached_documents(_cache.followers_key())
             # A withdrawn request may still be awaiting approval.
             self.storage.remove_follow_request(actor_id, target_actor_id)
         elif inner_type in ("Like", "Announce") and isinstance(inner, dict):
@@ -621,7 +637,7 @@ class InboxProcessor:
         """Extract actor URLs from Mention tags in the object data."""
         return mentioned_actors(obj_data)
 
-    def _handle_create(self, activity: Activity, _: dict) -> dict | None:
+    def _handle_create(self, activity: Activity, _: dict) -> Optional[dict]:
         """Handle an incoming Create activity (reply/comment, quote, or mention)."""
         obj_data = activity.object
         if not isinstance(obj_data, dict):
@@ -721,7 +737,7 @@ class InboxProcessor:
 
         return None
 
-    def _handle_like(self, activity: Activity, _: dict) -> dict | None:
+    def _handle_like(self, activity: Activity, _: dict) -> Optional[dict]:
         """Handle an incoming Like activity."""
         obj = activity.object
         target = (
@@ -775,7 +791,7 @@ class InboxProcessor:
 
         return None
 
-    def _handle_announce(self, activity: Activity, _: dict) -> dict | None:
+    def _handle_announce(self, activity: Activity, _: dict) -> Optional[dict]:
         """Handle an incoming Announce (boost) activity."""
         obj = activity.object
         target = (
@@ -831,7 +847,7 @@ class InboxProcessor:
 
         return None
 
-    def _handle_delete(self, activity: Activity, _: dict) -> dict | None:
+    def _handle_delete(self, activity: Activity, _: dict) -> Optional[dict]:
         """Handle an incoming Delete activity."""
         obj = activity.object
         if isinstance(obj, dict):
@@ -850,6 +866,7 @@ class InboxProcessor:
             # The scope is (remote_actor, local_actor): which actors the
             # remote followed on other deployments is unknown here.
             self.storage.remove_follower(activity.actor, self.actor_id)
+            self._invalidate_cached_documents(_cache.followers_key())
             logger.info(
                 "Removed follower %s for actor %s (actor deleted)",
                 activity.actor,
@@ -868,7 +885,7 @@ class InboxProcessor:
         logger.info("Processed Delete from %s for %s", activity.actor, target)
         return None
 
-    def _handle_update(self, activity: Activity, _: dict) -> dict | None:
+    def _handle_update(self, activity: Activity, _: dict) -> Optional[dict]:
         """Handle an incoming Update activity."""
         obj_data = activity.object
         if not isinstance(obj_data, dict):
@@ -925,7 +942,7 @@ class InboxProcessor:
         logger.info("Updated reply from %s on %s", activity.actor, target)
         return None
 
-    def _handle_quote_request(self, activity: Activity, raw: dict) -> dict | None:
+    def _handle_quote_request(self, activity: Activity, raw: dict) -> Optional[dict]:
         """Handle an incoming QuoteRequest activity (FEP-044f).
 
         If ``auto_approve_quotes`` is enabled, builds a

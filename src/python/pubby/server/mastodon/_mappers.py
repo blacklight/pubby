@@ -13,7 +13,6 @@ from urllib.parse import urlparse
 from ...handlers import ActivityPubHandler
 from ..._model import Follower, InteractionType
 
-
 # -- Stable ID helpers -------------------------------------------------------
 
 

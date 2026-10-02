@@ -1,4 +1,10 @@
-from ._helpers import DEFAULT_ASYNC_DRIVER_MAP, init_db_storage, to_sync_url
+from ._helpers import (
+    DEFAULT_ASYNC_DRIVER_MAP,
+    get_db_storage,
+    init_db_storage,
+    reset_db_storage,
+    to_sync_url,
+)
 from ._model import (
     DbActivity,
     DbActorCache,
@@ -18,6 +24,8 @@ __all__ = [
     "DbInteraction",
     "DbInteractionMention",
     "DEFAULT_ASYNC_DRIVER_MAP",
+    "get_db_storage",
     "init_db_storage",
+    "reset_db_storage",
     "to_sync_url",
 ]

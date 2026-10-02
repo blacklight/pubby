@@ -22,6 +22,15 @@ from ._model import (
 )
 from ._rate_limit import RateLimiter
 from .attribution import validate as validate_attribution
+from .cache import (
+    CachedResponse,
+    DocumentCache,
+    DocumentStore,
+    InMemoryDocumentStore,
+    RedisDocumentStore,
+    cache_headers,
+    etag_matches,
+)
 from .audience import PUBLIC_URIS, addressees, is_public, mentioned_actors
 from .client import extract_actor_inbox, resolve_actor_inbox
 from .content import (
@@ -87,11 +96,16 @@ __all__ = [
     "build_quote_request_activity",
     "build_undo_activity",
     "build_update_activity",
+    "cache_headers",
+    "CachedResponse",
     "collect_inboxes",
     "deliver_activity",
     "DeliveryError",
     "DeliveryStatus",
     "display_url",
+    "DocumentCache",
+    "DocumentStore",
+    "etag_matches",
     "extract_actor_inbox",
     "extract_domain",
     "extract_mentions",
@@ -100,6 +114,7 @@ __all__ = [
     "FollowPolicy",
     "FollowRequest",
     "format_duration",
+    "InMemoryDocumentStore",
     "Interaction",
     "InteractionStatus",
     "InteractionType",
@@ -116,6 +131,7 @@ __all__ = [
     "PUBLIC_URIS",
     "RateLimiter",
     "RateLimitError",
+    "RedisDocumentStore",
     "reject_follow_request",
     "render_bio_html",
     "render_link_anchor",

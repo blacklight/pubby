@@ -62,6 +62,10 @@ class AdapterResponse:
 class AdapterClient:
     """Thin wrapper unifying HTTP test clients across frameworks."""
 
+    def get_response(self, path, headers=None):
+        """Return the framework's raw response object (header inspection)."""
+        raise NotImplementedError
+
     def get(self, path, headers=None):
         raise NotImplementedError
 
@@ -70,18 +74,29 @@ class AdapterClient:
 
 
 class FlaskAdapterClient(AdapterClient):
-    def __init__(self, handler, rate_limiter=None):
+    def __init__(
+        self, handler, rate_limiter=None, document_cache=None, rate_limit_key=None
+    ):
         from flask import Flask
         from pubby.server.adapters.flask import bind_activitypub
 
         app = Flask(__name__)
         app.config["TESTING"] = True
-        bind_activitypub(app, handler, rate_limiter=rate_limiter)
+        bind_activitypub(
+            app,
+            handler,
+            rate_limiter=rate_limiter,
+            document_cache=document_cache,
+            rate_limit_key=rate_limit_key,
+        )
         self._client = app.test_client()
         self._handler = handler
 
+    def get_response(self, path, headers=None):
+        return self._client.get(path, headers=headers or {})
+
     def get(self, path, headers=None):
-        resp = self._client.get(path, headers=headers or {})
+        resp = self.get_response(path, headers)
         try:
             data = resp.get_json()
         except Exception:
@@ -98,18 +113,29 @@ class FlaskAdapterClient(AdapterClient):
 
 
 class FastAPIAdapterClient(AdapterClient):
-    def __init__(self, handler, rate_limiter=None):
+    def __init__(
+        self, handler, rate_limiter=None, document_cache=None, rate_limit_key=None
+    ):
         from fastapi import FastAPI
         from starlette.testclient import TestClient
         from pubby.server.adapters.fastapi import bind_activitypub
 
         app = FastAPI()
-        bind_activitypub(app, handler, rate_limiter=rate_limiter)
+        bind_activitypub(
+            app,
+            handler,
+            rate_limiter=rate_limiter,
+            document_cache=document_cache,
+            rate_limit_key=rate_limit_key,
+        )
         self._client = TestClient(app)
         self._handler = handler
 
+    def get_response(self, path, headers=None):
+        return self._client.get(path, headers=headers or {})
+
     def get(self, path, headers=None):
-        resp = self._client.get(path, headers=headers or {})
+        resp = self.get_response(path, headers)
         ct = resp.headers.get("content-type", "")
         try:
             data = resp.json()
@@ -128,7 +154,9 @@ class FastAPIAdapterClient(AdapterClient):
 
 
 class TornadoAdapterClient(AdapterClient):
-    def __init__(self, handler, rate_limiter=None):
+    def __init__(
+        self, handler, rate_limiter=None, document_cache=None, rate_limit_key=None
+    ):
         import threading
 
         import tornado.ioloop
@@ -141,7 +169,13 @@ class TornadoAdapterClient(AdapterClient):
         # Create a dedicated IOLoop in a background thread
         self._loop = tornado.ioloop.IOLoop()
         app = tornado.web.Application()
-        bind_activitypub(app, handler, rate_limiter=rate_limiter)
+        bind_activitypub(
+            app,
+            handler,
+            rate_limiter=rate_limiter,
+            document_cache=document_cache,
+            rate_limit_key=rate_limit_key,
+        )
         server = HTTPServer(app)
         sock, port = bind_unused_port()
         server.add_socket(sock)
@@ -162,10 +196,13 @@ class TornadoAdapterClient(AdapterClient):
     def _url(self, path):
         return f"http://127.0.0.1:{self._port}{path}"
 
-    def get(self, path, headers=None):
+    def get_response(self, path, headers=None):
         import requests as req
 
-        resp = req.get(self._url(path), headers=headers or {}, timeout=5)
+        return req.get(self._url(path), headers=headers or {}, timeout=5)
+
+    def get(self, path, headers=None):
+        resp = self.get_response(path, headers)
         ct = resp.headers.get("content-type", "")
         try:
             data = resp.json()
@@ -185,7 +222,7 @@ class TornadoAdapterClient(AdapterClient):
         return resp.status_code, d, ct
 
 
-def _make_handler(rate_limiter=None):
+def _make_handler(rate_limiter=None, document_cache=None):
     # Use StaticPool to share in-memory SQLite across threads
     # (needed for Tornado's threaded test client)
     import sqlalchemy
@@ -206,6 +243,7 @@ def _make_handler(rate_limiter=None):
             "summary": "A test blog",
         },
         private_key=private_key,
+        document_cache=document_cache,
     )
 
 

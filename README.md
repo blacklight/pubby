@@ -44,6 +44,8 @@
   - [Instance Allow/Block Lists](#instance-allowblock-lists)
 - [Rendering Interactions](#rendering-interactions)
 - [Rate Limiting](#rate-limiting)
+- [Document Caching](#document-caching)
+  - [Storage reuse](#storage-reuse)
 - [Interaction Callbacks](#interaction-callbacks)
   - [Private Messages](#private-messages)
 - [Strict Attribution](#strict-attribution)
@@ -779,6 +781,7 @@ activity that was delivered.
 | `deliver` | `Callable[[str, dict], None]` | `None` | Custom delivery callable invoked per inbox (see Custom Delivery) |
 | `strict_attribution` | `bool` | `False` | Reject inbound `Create`/`Update` objects whose `attributedTo` or `id` authority does not match the delivering actor (see Strict Attribution) |
 | `follow_policy` | `Callable[[str, str], FollowPolicy \| str \| None]` | `None` | Per-follow approval policy callback (see Follow approval policies); defaults to `MANUAL` for every target when `manually_approves_followers` is set |
+| `document_cache` | `DocumentCache` | `None` | Shared dereference-document cache (see Document Caching); used by the adapters' GET endpoints and invalidated on local mutations |
 
 ### `actor_config`
 
@@ -949,6 +952,102 @@ from pubby.server.adapters.flask import bind_activitypub
 rate_limiter = RateLimiter(max_requests=100, window_seconds=60)
 bind_activitypub(app, handler, rate_limiter=rate_limiter)
 ```
+
+When the app sits behind a reverse proxy, the default client-IP bucket is
+shared by every remote server. Pass `rate_limit_key` to
+`bind_activitypub` to bucket by a trusted header instead.
+
+## Document Caching
+
+When a post is boosted across the Fediverse, hundreds of remote instances
+dereference your actor document, objects, WebFinger record and collections
+at once — a stampede of identical GETs that each re-render the same JSON
+from the database. `DocumentCache` folds those into a single render:
+
+```python
+from pubby import DocumentCache
+from pubby.server.adapters.flask import bind_activitypub
+
+cache = DocumentCache(default_ttl=60)          # shared, bounded (10k entries)
+handler = ActivityPubHandler(
+    storage=storage,
+    actor_config={...},
+    private_key=private_key,
+    document_cache=cache,                       # mutations invalidate entries
+)
+bind_activitypub(app, handler)                  # GETs are cached + coalesced
+```
+
+With a cache configured, every adapter's dereference GET routes share one
+in-flight render per document (single-flight), cache misses (404s) briefly,
+emit `Cache-Control`/`Vary: Accept`/`ETag` and answer `If-None-Match` with
+`304`. Mutations made through the handler (actor updates, published
+activities, follow/unfollow, accepted follow requests) invalidate the
+corresponding entries; the TTL bounds staleness for anything else.
+
+Responses advertise the cache entry's *remaining* freshness (`max-age` of
+what is left, not a restarted full TTL), so downstream caches do not
+extend an already-aged document's lifetime. When no freshness is left — a
+stale-if-error hit, an invalidated mid-flight render, a failed store
+write — the response carries an explicit `max-age=0, must-revalidate`
+instead of dropping Cache-Control; with caching disabled (`default_ttl=0`)
+it carries `no-store`. `Vary` and `ETag` are always emitted so a `304`
+keeps its validator. WebFinger resources are validated *before* cache
+lookup (`ActivityPubHandler.is_valid_webfinger_resource`), so a malformed
+`resource` is rejected uncached and cannot poison the valid account's
+entry. NodeInfo routes serve `application/json`, not an ActivityStreams
+media type.
+
+Cache keys are tuples — `("obj", "alice", "abc123")` — so prefix
+invalidation (`invalidate_prefix(("obj", "alice"))`) is exact and cannot
+collide the way flat `a:b:c` strings do. Pubby's own route keys live
+under the `("pubby", …)` namespace, so sharing one `DocumentCache` with
+your own routes is safe — neither side's invalidation touches the
+other's entries.
+
+The default `InMemoryDocumentStore` is a bounded LRU; swap in
+`RedisDocumentStore(redis_client)` to share entries — and therefore
+completed invalidations — across processes. Two caveats: the Redis
+backend is synchronous (calls block the calling thread, including on the
+event loop in the async path), and the shared-store guarantee is weaker
+than the in-process one — generation counters are per `DocumentCache`
+instance, so a render already in flight in process A can still store its
+pre-mutation result after process B invalidated the key. See the
+`RedisDocumentStore` docstring before relying on it for mutation races.
+`stale_factor` retains expired entries briefly and serves them
+when a re-render fails (database hiccups), and a failing store degrades
+to uncached renders rather than request errors — a `get` failure counts
+as a miss, a `set` failure is skipped. Sync-path waiters are bounded by
+`wait_timeout` (default 30 s), falling back to stale data or the
+rendered error.
+
+The cache is usable standalone for your own endpoints:
+
+```python
+doc = await cache.get_or_render_async(("obj", username, object_id), render, ttl=60)
+```
+
+where `render` returns the JSON-serializable document (or
+`CachedResponse.document(doc)` to keep a serialized body with a
+precomputed ETag). `None` results are cached for at most `miss_ttl`
+seconds; exceptions propagate to every waiter and are never stored.
+
+### Storage reuse
+
+`init_db_storage` creates a new engine — with its own connection pool —
+and runs `create_all` on every call. On a hot path (e.g. one storage per
+request) this leaks pools until the database refuses connections. Create
+the storage once and reuse it:
+
+```python
+from pubby.storage.adapters.db import get_db_storage
+
+# Memoized by (URL, engine kwargs, table names); pass pool bounds through:
+storage = get_db_storage(db_url, pool_size=5, max_overflow=10)
+```
+
+or call `init_db_storage(..., create_tables=False)` after your own
+migrations have run to skip the DDL round-trip.
 
 ## Interaction Callbacks
 
