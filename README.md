@@ -1679,6 +1679,10 @@ tags = build_hashtag_tags(rc.hashtags, lambda name: f"https://example.com/tags/{
 | `build_hashtag_tags(names, hashtag_url)` | Build `Hashtag` tag dicts from normalized names. |
 | `set_object_content(obj, text, hashtag_url)` | Set `obj['content']` from plain text and merge detected hashtags into `obj['tag']`. |
 | `format_duration(seconds)` | Format seconds as an ISO-8601 duration (`PT[h]H[m]M[s]S`) for media objects. |
+| `parse_duration(value)` | Parse an `xsd:duration` string (or bare seconds) into seconds; `None` when unparseable. |
+| `ordered_collection(id, items, context=None)` | Build a flat `OrderedCollection` document. |
+| `ordered_collection_index(id, total, page_size, context=None)` | Build a paged `OrderedCollection` index with `first`/`last` page links. |
+| `ordered_collection_page(id, page, total, items, page_size, context=None)` | Build an `OrderedCollectionPage` with `partOf` and `next`/`prev` links. |
 | `render_verified_link(url, label=None)` | Render a `rel="me"` link or escaped text. |
 | `property_value_attachment(name, url, label=None)` | Build a `PropertyValue` dict for `ActorConfig.attachment`. |
 | `is_linkable_url(url)` | `True` for safe `http`/`https` URLs with a hostname. |

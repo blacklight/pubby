@@ -14,6 +14,7 @@ from pubby import (
     display_url,
     format_duration,
     is_linkable_url,
+    parse_duration,
     property_value_attachment,
     render_bio_html,
     render_link_anchor,
@@ -365,6 +366,44 @@ class TestFormatDuration:
     def test_zero_and_negative(self):
         assert format_duration(0) == "PT0S"
         assert format_duration(-42) == "PT0S"
+
+
+class TestParseDuration:
+    def test_seconds_only(self):
+        assert parse_duration("PT3S") == 3.0
+        assert parse_duration("PT59S") == 59.0
+
+    def test_minutes(self):
+        assert parse_duration("PT1M") == 60.0
+        assert parse_duration("PT3M5S") == 185.0
+        assert parse_duration("PT11M57S") == 717.0
+
+    def test_hours(self):
+        assert parse_duration("PT1H") == 3600.0
+        assert parse_duration("PT1H2M3S") == 3723.0
+
+    def test_days(self):
+        assert parse_duration("P1D") == 86400.0
+        assert parse_duration("P1DT1H") == 90000.0
+
+    def test_numeric(self):
+        assert parse_duration(717) == 717.0
+        assert parse_duration(63.9) == 63.9
+        assert parse_duration("95") == 95.0
+        assert parse_duration("-3") == 0.0
+
+    def test_unparseable(self):
+        assert parse_duration("forever") is None
+        assert parse_duration("PT") is None
+        assert parse_duration("") is None
+        assert parse_duration(None) is None
+        assert parse_duration(True) is None
+        assert parse_duration("P1Y") is None
+
+    def test_format_roundtrip(self):
+        assert parse_duration(format_duration(3.0)) == 3.0
+        assert parse_duration(format_duration(717)) == 717.0
+        assert parse_duration(format_duration(3723.0)) == 3723.0
 
 
 class TestSetObjectContent:

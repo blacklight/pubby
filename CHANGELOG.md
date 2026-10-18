@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `pubby.content`: `parse_duration` — the inverse of `format_duration`,
+  parses `xsd:duration` dayTime strings (`PnDTnHnMnS`) into seconds; also
+  accepts bare int/float/numeric-string seconds for legacy producers.
+- `pubby.collections`: `OrderedCollection` document helpers —
+  `ordered_collection` builds a flat collection document;
+  `ordered_collection_index`/`ordered_collection_page` build the index +
+  `?page=N` page pair (`first`/`last`/`next`/`prev`/`partOf`) for paged
+  collections such as outboxes.
+
+### Changed
+
+- `ActivityPubHandler.get_followers_collection` and
+  `get_following_collection` now build their documents through
+  `pubby.collections.ordered_collection` (same wire shape).
+
 ## 0.3.11
 
 ### Added

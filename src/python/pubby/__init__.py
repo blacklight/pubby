@@ -33,12 +33,18 @@ from .cache import (
 )
 from .audience import PUBLIC_URIS, addressees, is_public, mentioned_actors
 from .client import extract_actor_inbox, resolve_actor_inbox
+from .collections import (
+    ordered_collection,
+    ordered_collection_index,
+    ordered_collection_page,
+)
 from .content import (
     RenderedContent,
     build_hashtag_tags,
     display_url,
     format_duration,
     is_linkable_url,
+    parse_duration,
     property_value_attachment,
     render_bio_html,
     render_link_anchor,
@@ -126,6 +132,10 @@ __all__ = [
     "normalize_domain",
     "Object",
     "ObjectType",
+    "ordered_collection",
+    "ordered_collection_index",
+    "ordered_collection_page",
+    "parse_duration",
     "property_value_attachment",
     "PUBLIC_QUOTE_POLICY",
     "PUBLIC_URIS",

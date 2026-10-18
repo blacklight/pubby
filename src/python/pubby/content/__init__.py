@@ -308,6 +308,59 @@ def format_duration(seconds: float) -> str:
     return duration
 
 
+# ``xsd:duration`` restricted to the dayTime components media objects use
+# (``PnDTnHnMnS``); year/month/week components are rejected.
+_XSD_DURATION_RE = re.compile(
+    r"^P(?:(?P<days>\d+(?:\.\d+)?)D)?"
+    r"(?:T(?:(?P<hours>\d+(?:\.\d+)?)H)?(?:(?P<minutes>\d+(?:\.\d+)?)M)?(?:(?P<seconds>\d+(?:\.\d+)?)S)?)?$"
+)
+
+
+def parse_duration(value: Any) -> Optional[float]:
+    """
+    Parse an ActivityStreams ``duration`` value into seconds.
+
+    The AS2 vocabulary defines ``duration`` as an ``xsd:duration`` string
+    (e.g. ``PT3M25S``) — what spec-compliant servers emit — while some
+    producers send bare seconds as an int, float or numeric string.  All
+    three shapes are accepted; unparseable values and non-strings that
+    aren't numbers (including ``bool``) return ``None``.
+
+    Examples::
+
+        parse_duration("PT3S")     -> 3.0
+        parse_duration("PT1H2M3S") -> 3723.0
+        parse_duration("P1DT1H")   -> 90000.0
+        parse_duration(63.9)       -> 63.9
+        parse_duration("PT")       -> None
+
+    :param value: The ``duration`` value of a media object.
+    :return: The duration in seconds, or ``None`` when unparseable.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return max(0.0, float(value))
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    # A bare numeric string is seconds (legacy producers).
+    try:
+        return max(0.0, float(text))
+    except ValueError:
+        pass
+    match = _XSD_DURATION_RE.match(text)
+    if match is None or not any(match.groups()):
+        return None
+    days = float(match.group("days") or 0)
+    hours = float(match.group("hours") or 0)
+    minutes = float(match.group("minutes") or 0)
+    seconds = float(match.group("seconds") or 0)
+    return days * 86400 + hours * 3600 + minutes * 60 + seconds
+
+
 def set_object_content(
     obj: Dict[str, Any], text: str, hashtag_url: Callable[[str], str]
 ) -> None:

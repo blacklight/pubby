@@ -21,6 +21,7 @@ from .._model import (
     AP_CONTEXT,
 )
 from .. import cache as _cache
+from ..collections import ordered_collection
 from ..crypto._keys import load_private_key, export_public_key_pem
 from ..render import InteractionsRenderer
 from ..storage import ActivityPubStorage
@@ -426,13 +427,7 @@ class ActivityPubHandler:
         """
         target = actor_id or self.actor_id
         followers = self.storage.get_followers(actor_id=target)
-        return {
-            "@context": AP_CONTEXT,
-            "id": self.followers_url,
-            "type": "OrderedCollection",
-            "totalItems": len(followers),
-            "orderedItems": [f.actor_id for f in followers],
-        }
+        return ordered_collection(self.followers_url, [f.actor_id for f in followers])
 
     def get_following_collection(self) -> dict:
         """
@@ -440,13 +435,7 @@ class ActivityPubHandler:
 
         :return: The following collection dictionary.
         """
-        return {
-            "@context": AP_CONTEXT,
-            "id": self.following_url,
-            "type": "OrderedCollection",
-            "totalItems": 0,
-            "orderedItems": [],
-        }
+        return ordered_collection(self.following_url, [])
 
     # ---------- Discovery ----------
 

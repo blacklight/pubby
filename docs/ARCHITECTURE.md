@@ -584,6 +584,16 @@ validated `http`/`https` URLs.
 - **`format_duration(seconds)`** — formats a number of seconds as an
   ISO-8601 `PT[h]H[m]M[s]S` duration string, for the `duration` field of
   `Audio`/`Video` objects.
+- **`parse_duration(value)`** — the inverse: parses `xsd:duration` dayTime
+  strings (`PnDTnHnMnS`) into seconds; also accepts bare int/float seconds
+  and numeric strings for legacy producers. Returns `None` on
+  unparseable input.
+- **`pubby.collections`** — `OrderedCollection` document helpers for
+  serving collections: `ordered_collection(id, items)` builds a flat
+  collection document; `ordered_collection_index(id, total, page_size)`
+  and `ordered_collection_page(id, page, total, items, page_size)` build
+  the index + `?page=N` page pair (`first`/`last`/`next`/`prev`/`partOf`)
+  for paged collections such as outboxes.
 - **`render_verified_link(url, label=None)`** — renders a `rel="me"` anchor for
   valid URLs or escaped text for invalid ones.
 - **`property_value_attachment(name, url, label=None)`** — builds a
@@ -703,6 +713,7 @@ pubby.__init__
   │                             → _exceptions, moderation
   ├── pubby.content            (plain-text HTML renderers, Hashtag tag builder,
   │                             object content/duration helpers)
+  ├── pubby.collections        (OrderedCollection/Page document helpers)
   ├── pubby.webfinger          (Mention, resolve_actor_url, extract_mentions)
   ├── pubby.crypto             (_keys, _signatures)
   ├── pubby.client             (extract_actor_inbox, resolve_actor_inbox)
