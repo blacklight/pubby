@@ -285,6 +285,16 @@ class TestPropertyValueAttachment:
         attachment = property_value_attachment("Bad", "javascript:alert(1)")
         assert attachment["value"] == "javascript:alert(1)"
 
+    def test_render_html_false_emits_bare_url(self):
+        attachment = property_value_attachment(
+            "Website", "https://e.com", render_html=False
+        )
+        assert attachment == {
+            "type": "PropertyValue",
+            "name": "Website",
+            "value": "https://e.com",
+        }
+
     def test_appears_in_actor_document(self, private_key):
         storage = MagicMock()
         storage.get_followers.return_value = []

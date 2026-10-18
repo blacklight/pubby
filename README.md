@@ -1684,7 +1684,7 @@ tags = build_hashtag_tags(rc.hashtags, lambda name: f"https://example.com/tags/{
 | `ordered_collection_index(id, total, page_size, context=None)` | Build a paged `OrderedCollection` index with `first`/`last` page links. |
 | `ordered_collection_page(id, page, total, items, page_size, context=None)` | Build an `OrderedCollectionPage` with `partOf` and `next`/`prev` links. |
 | `render_verified_link(url, label=None)` | Render a `rel="me"` link or escaped text. |
-| `property_value_attachment(name, url, label=None)` | Build a `PropertyValue` dict for `ActorConfig.attachment`. |
+| `property_value_attachment(name, url, label=None, render_html=True)` | Build a `PropertyValue` dict for `ActorConfig.attachment`. Pass `render_html=False` to emit the bare URL (`value`) that Funkwhale <= 2.0.x requires. |
 | `is_linkable_url(url)` | `True` for safe `http`/`https` URLs with a hostname. |
 | `display_url(url)` | Scheme-less URL for use as link text. |
 | `render_link_anchor(url, rel=None, label=None)` | Render an HTML `<a>` element. |

@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `pubby.content`: `property_value_attachment(..., render_html=False)`
+  emits the bare URL as `value` instead of a `rel="me"` HTML anchor —
+  the shape Funkwhale emits and the only one its `AttachmentSerializer`
+  (`value` as `URLField`) accepts on actor documents up to 2.0.x.
 ## 0.3.12
 
 ### Added

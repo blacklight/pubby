@@ -251,25 +251,32 @@ def render_verified_link(url: str, label: Optional[str] = None) -> str:
 
 
 def property_value_attachment(
-    name: str, url: str, label: Optional[str] = None
+    name: str, url: str, label: Optional[str] = None, render_html: bool = True
 ) -> Dict[str, str]:
     """
     Build a ``PropertyValue`` attachment dict for ``ActorConfig.attachment``.
 
-    The returned ``value`` is an HTML anchor with ``rel="me"`` when ``url`` is
-    valid, or escaped plain text otherwise.  This helper does not perform the
-    actual verification: remote servers verify by fetching the linked page and
-    checking for a backlink.
+    With ``render_html=True`` (the default) the returned ``value`` is an HTML
+    anchor with ``rel="me"`` when ``url`` is valid, or escaped plain text
+    otherwise — the Mastodon-style shape.  With ``render_html=False`` the
+    ``value`` is the bare URL, the shape Funkwhale emits and the only one its
+    ``AttachmentSerializer`` accepted as an ``URLField`` up to release 2.0.x —
+    consumers on those releases reject HTML-valued attachments on actor
+    documents during fetches.
+
+    This helper does not perform the actual verification: remote servers
+    verify by fetching the linked page and checking for a backlink.
 
     :param name: Field label (e.g. ``"Website"``).
     :param url: Link URL.
     :param label: Optional link text; defaults to the scheme-less display URL.
+    :param render_html: Whether to render ``value`` as a ``rel="me"`` anchor.
     :return: A ``{"type": "PropertyValue", "name": ..., "value": ...}`` dict.
     """
     return {
         "type": "PropertyValue",
         "name": name,
-        "value": render_verified_link(url, label=label),
+        "value": render_verified_link(url, label=label) if render_html else url,
     }
 
 

@@ -596,8 +596,10 @@ validated `http`/`https` URLs.
   for paged collections such as outboxes.
 - **`render_verified_link(url, label=None)`** — renders a `rel="me"` anchor for
   valid URLs or escaped text for invalid ones.
-- **`property_value_attachment(name, url, label=None)`** — builds a
-  `PropertyValue` dict suitable for `ActorConfig.attachment`.
+- **`property_value_attachment(name, url, label=None, render_html=True)`** —
+  builds a `PropertyValue` dict suitable for `ActorConfig.attachment`;
+  `render_html=False` emits the bare URL as `value` (Funkwhale <= 2.0.x
+  requires a valid URL there).
 
 ### 14. Server Adapters — `pubby.server.adapters`
 
