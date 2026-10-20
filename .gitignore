@@ -11,3 +11,5 @@ __pycache__
 .coverage
 coverage.xml
 docs/_build
+target/
+!Cargo.lock

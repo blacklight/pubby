@@ -1,0 +1,19 @@
+{
+  "source_actor_id": "https://r.com/users/alice",
+  "target_resource": "https://blog.example.com/posts/1",
+  "interaction_type": "reply",
+  "activity_id": "",
+  "object_id": "https://r.com/posts/9",
+  "content": "hello from Python",
+  "author_name": "",
+  "author_url": "",
+  "author_photo": "",
+  "published": null,
+  "status": "confirmed",
+  "metadata": {},
+  "created_at": null,
+  "updated_at": null,
+  "mentioned_actors": [
+    "https://blog.example.com/ap/actor"
+  ]
+}

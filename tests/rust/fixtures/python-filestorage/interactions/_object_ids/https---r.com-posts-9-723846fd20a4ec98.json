@@ -1,0 +1,5 @@
+{
+  "target_resource": "https://blog.example.com/posts/1",
+  "interaction_type": "reply",
+  "source_actor_id": "https://r.com/users/alice"
+}

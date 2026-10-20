@@ -60,6 +60,7 @@ filename = "CHANGELOG.md"
 search = "Unreleased"
 
 [tool.pytest.ini_options]
+testpaths = ["tests/python"]
 markers = [
     "integration: marks integration tests",
 ]

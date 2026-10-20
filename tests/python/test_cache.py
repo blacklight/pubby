@@ -763,7 +763,7 @@ class TestDbStorageHelpers:
 @pytest.fixture(params=["flask", "fastapi", "tornado"])
 def cached_client(request):
     """Adapter client bound with a shared DocumentCache."""
-    from tests.conftest import (
+    from tests.python.conftest import (
         FlaskAdapterClient,
         FastAPIAdapterClient,
         TornadoAdapterClient,
@@ -944,7 +944,7 @@ class TestHandlerInvalidation:
 def bound_client(request):
     """Adapter client whose cache was given ONLY to ``bind_activitypub`` —
     the handler was constructed without one."""
-    from tests.conftest import (
+    from tests.python.conftest import (
         FlaskAdapterClient,
         FastAPIAdapterClient,
         TornadoAdapterClient,
@@ -1032,7 +1032,7 @@ class TestAdapterCachePropagation:
 class TestRateLimitKey:
     @pytest.fixture(params=["flask", "fastapi", "tornado"])
     def bucketed_client(self, request):
-        from tests.conftest import (
+        from tests.python.conftest import (
             FlaskAdapterClient,
             FastAPIAdapterClient,
             TornadoAdapterClient,
@@ -1085,7 +1085,7 @@ class TestRateLimitKey:
         counter = itertools.count()
         for name in ("flask",):
             # One framework is enough to prove the callable decides the bucket.
-            from tests.conftest import FlaskAdapterClient, _make_handler
+            from tests.python.conftest import FlaskAdapterClient, _make_handler
 
             client = FlaskAdapterClient(
                 _make_handler(),

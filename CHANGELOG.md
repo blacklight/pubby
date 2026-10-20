@@ -2,6 +2,93 @@
 
 All notable changes to this project will be documented in this file.
 
+## _Unreleased_
+
+### Added
+
+- **Rust SDK** (`src/rust`, published as the `pubby-sdk` crate) — a
+  feature-parity Rust implementation of the Pubby API: data model and
+  enums, RSA key management and draft-cavage HTTP Signatures, inbox and
+  outbox processing, `ActivityPubHandler` facade, WebFinger and
+  NodeInfo, file-based storage (byte-compatible with the Python layout,
+  schema v4) and a SQLite adapter, document cache with single-flight
+  request coalescing (in-memory + Redis backends), content renderers,
+  quote support (FEP-044f), Mastodon-compatible API, a framework-agnostic
+  `server::dispatch` core and an `axum` adapter. Cargo features: `db`,
+  `redis`, `axum`, `async`.
+- `tests/rust` — integration tests for the Rust crate.
+- `.github/workflows/publish-crates.yml` — crates.io publishing on `v*`
+  tags, authenticated with the `CI CRATES_TOKEN` secret.
+- CI `rust` job in `build.yml` running `cargo fmt --check`,
+  `cargo clippy -D warnings` and `cargo test` across the workspace.
+
+### Changed
+
+- Python tests moved from `tests/` to `tests/python/` (imports updated
+  to `tests.python.conftest`); pytest/Makefile/CI updated accordingly.
+
+### Fixed (Rust SDK hardening pass)
+
+- `render`: three XSS vectors closed — `safe_url` output is now
+  auto-escaped and rejects quote/whitespace/angle-bracket injection in
+  URLs; `sanitize_html` HTML-entity-decodes `href` values before scheme
+  validation (blocks `jav&#x61;script:`-style smuggling) and rejects
+  protocol-relative URLs; custom templates now get HTML autoescape
+  (`select_autoescape(default_for_string=True)` parity).
+- `cache`: fixed a lost-wakeup race in `get_or_render` waiters, the
+  generation-counter race letting invalidated results be re-cached, the
+  Redis TTL overstatement (`set_ex` now takes the correct relative
+  expiry), `Duration::from_secs_f64` panics on negative/NaN
+  `wait_timeout`, and `Vec<u8>` payloads now survive Redis round-trips.
+  `CachedResponse` bodies/ETags now match Python (`json.dumps` +
+  SHA-1), and `get_or_render_async` is implemented behind the `async`
+  feature.
+- `HandlerOptions::default()` now matches the Python constructor
+  defaults (`http_timeout=15`, `max_retries=3`,
+  `max_delivery_workers=10`, `auto_approve_quotes`,
+  `async_delivery`, `software_name="pubby"`).
+- `inbox`: direct-mention interactions now key to the local actor (not
+  the remote object's own URL); follow-target locality compares the
+  full `netloc` (host + port) so same-host different-port instances are
+  not treated as local; embedded `actor` objects in activities resolve
+  to their `id`.
+- `attribution`: strict attribution no longer lets falsy-but-nonempty
+  `attributedTo` scalars (`false`, `0`, `0.0`) bypass validation.
+- `crypto`/`http`: HTTP signature verification now requires a signed,
+  matching `Digest` when a body is present and rejects requests whose
+  signed `Date` is outside a 5-minute window; `is_safe_outbound_url`
+  guards outbound fetches against loopback/link-local/private/CGNAT
+  targets and redirects are followed manually with per-hop validation;
+  PKCS#1 keys are accepted alongside PKCS#8; generated private-key
+  files are created with `0600` atomically.
+- `storage`: file-storage writes now emit `ensure_ascii`, `indent=2`
+  JSON byte-compatible with Python, index files are written
+  atomically, writes are fsynced, and locks are striped instead of an
+  unbounded per-path map; the SQLite adapter uses the Python column
+  names (`meta`, `mentioned_actor_url`), enforces the
+  `uix_actor_resource_type_object` UNIQUE constraint, and stores quote
+  authorizations in the `activities` table.
+- `server`/`axum`: storage failures surface as 500s instead of 404/200
+  fallthroughs, axum uses `OriginalUri` for the signature
+  `(request-target)` and `ConnectInfo` for rate-limit buckets, inbox
+  bodies are size-capped, NodeInfo `/2.0`, `/2.0.json` and `/2.1.json`
+  aliases are registered, an empty WebFinger `resource` returns 400,
+  `only_media` is coerced case-insensitively, and `MastodonAPI` accepts
+  the Python constructor overrides (`title`, `description`,
+  `contact_email`, `software_name`, `software_version`).
+- `model`: `dt_to_iso` omits the fraction for whole seconds (Python
+  `isoformat` parity), `parse_dt` handles negative fractional
+  timestamps correctly, `Interaction::from_json` rejects unknown
+  type/status values instead of silently coercing them, and
+  `format_duration` errors on non-finite input.
+- `storage/db`: `get_interactions_mentioning` referenced the renamed
+  `actor_url` column (regression from the schema-parity fix) — now uses
+  `mentioned_actor_url` and is covered by the SQLite storage test.
+- `http`/`webfinger`: outbound URL validation now also covers the
+  *initial* request target — `HttpClient::get`/`post` and
+  `resolve_actor_url` reject loopback/private/link-local/unsafe hosts
+  before the first request, not just redirect hops.
+
 ## 0.3.13
 
 ### Added

@@ -2,6 +2,17 @@
 
 ## Overview
 
+> **Note (Rust SDK):** the crate under `src/rust` mirrors this
+> architecture with idiomatic Rust types. `pubby_sdk::handlers::ActivityPubHandler`
+> is the facade; `storage::ActivityPubStorage` is a trait (file + SQLite
+> adapters); `cache::DocumentStore` is a trait (in-memory + Redis);
+> `server::dispatch` replaces the per-framework adapters, with `axum`
+> binding it to a `Router` behind the `axum` feature. The idiomatic
+> relaxations vs the Python API: serde_json `Value` in place of `dict`,
+> `Result`/typed errors in place of exceptions, and builder-style
+> options in place of kwargs.
+
+
 Pubby is a framework-agnostic Python ≥ 3.8 library that adds
 [ActivityPub](https://www.w3.org/TR/activitypub/) federation to any Python web
 application.  It handles inbox processing, outbox delivery, HTTP Signatures,
@@ -795,3 +806,51 @@ pubby.__init__
    covered by `build_quote_request_activity()` /
    `build_quote_authorization()` and the `pubby.quotes` field/policy
    helpers.
+
+## Rust SDK — `src/rust` (crate `pubby-sdk`)
+
+A feature-parity Rust port of the library, published to crates.io. It
+mirrors the layers above with the same ActivityPub wire semantics.
+
+### Layer mapping
+
+| Python | Rust |
+|--------|------|
+| `pubby._model` | `model` — `serde_json::Value` documents + typed structs/enums |
+| `pubby._exceptions` | `error` — `ActivityPubError` enum + `Result` alias |
+| `pubby._rate_limit` | `rate_limit` — `RateLimiter` |
+| `pubby.cache` | `cache` — `DocumentCache` (single-flight), `DocumentStore` trait, `InMemoryDocumentStore`, `RedisDocumentStore` (feature `redis`), `CachedResponse`, header/ETag helpers |
+| `pubby.moderation` | `moderation` — domain allow/block lists |
+| `pubby.audience` | `audience` — addressing extraction and public/dm checks |
+| `pubby.attribution` | `attribution` — inbound object attribution checks |
+| `pubby.quotes` | `quotes` — quote field extraction, FEP-044f context/terms |
+| `pubby.collections` | `collections` — `OrderedCollection` helpers |
+| `pubby.content` | `content` — plain-text → HTML renderers, duration parsing |
+| `pubby.crypto` | `crypto` — RSA keys (`rsa` crate), HTTP Signatures |
+| `pubby.webfinger` | `webfinger` — WebFinger lookup + mention resolution |
+| `pubby.client` | `client` — actor/inbox resolution with signed fetch |
+| `pubby.follows` | `follows` — pending follow-request accept/reject |
+| `pubby.storage` | `storage` — `ActivityPubStorage` trait; `file::FileActivityPubStorage` (byte-compatible schema v4 + migrations); `db::SqliteActivityPubStorage` (feature `db`); `migrations` backfills |
+| `pubby.handlers` | `handlers` — `discovery`, `client`, `inbox::InboxProcessor`, `outbox::OutboxProcessor`, `handler::ActivityPubHandler` (+`HandlerOptions`) |
+| `pubby.render` | `render` — `InteractionsRenderer` on `minijinja`, same bundled templates, `sanitize_html`, `template_utils` |
+| `pubby.server.adapters.*` | `server` — framework-agnostic `dispatch()`/`serve_document()` + `axum` adapter (feature `axum`); actix-web/Rocket consume `dispatch()` via thin shims |
+| `pubby.server.mastodon` | `server::mastodon` — mappers + `MastodonAPI` |
+
+### Notable semantic relaxations
+
+- Python `dict` ↔ `serde_json::Value`; `datetime` ↔ `chrono::DateTime<Utc>`;
+  kwargs ↔ `HandlerOptions` struct; exceptions ↔ `Result`.
+- Single-flight render coalescing is thread-based (`Mutex`/`Condvar`),
+  not asyncio.
+- Fan-out delivery uses a bounded `std::thread` pool; `async_delivery`
+  spawns a background thread.
+- The file storage writes the same layout/filenames/schema-version file
+  as the Python adapter, so a data directory can be shared or migrated
+  across implementations.
+
+### Feature flags
+
+- `db` — SQLite storage via `rusqlite`.
+- `redis` — `RedisDocumentStore`.
+- `axum` — `server::axum::{activitypub_router, mastodon_router}`.
+- `async`/`tokio` — reserved for async APIs.

@@ -1,0 +1,8 @@
+{
+  "actor_id": "https://r.com/users/alice",
+  "actor_data": {
+    "id": "https://r.com/users/alice",
+    "inbox": "https://r.com/users/alice/inbox"
+  },
+  "fetched_at": "2026-10-19T23:48:14.471542+00:00"
+}

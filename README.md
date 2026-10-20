@@ -17,6 +17,7 @@
 - [What is ActivityPub?](#what-is-activitypub)
 - [What is Pubby?](#what-is-pubby)
 - [Installation](#installation)
+  - [Rust SDK](#rust-sdk)
 - [Quick Start](#quick-start)
   - [Flask](#flask)
   - [FastAPI](#fastapi)
@@ -112,6 +113,9 @@ you can focus on your app:
 - **Interaction storage** — followers, interactions, activities, actor cache
 - **Framework adapters** — Flask, FastAPI, Tornado
 - **Storage adapters** — SQLAlchemy (any supported database) and file-based JSON
+- **Rust SDK** — the same ActivityPub core available as the
+  [`pubby-sdk`](https://crates.io/crates/pubby-sdk) crate (see
+  [Rust SDK](#rust-sdk))
 
 ## Installation
 
@@ -130,6 +134,29 @@ pip install "pubby[db,tornado]"      # SQLAlchemy + Tornado
 ```
 
 Available extras: `db`, `flask`, `fastapi`, `tornado`.
+
+### Rust SDK
+
+The Rust implementation lives under `src/rust` and is published to
+crates.io as `pubby-sdk`:
+
+```toml
+[dependencies]
+pubby-sdk = "0.3"
+```
+
+Cargo features: `db` (SQLite storage via `rusqlite`), `redis`
+(Redis-backed document store), `axum` (web framework adapter),
+`async`/`tokio` (async support). The crate is framework-agnostic at its
+core — `pubby_sdk::server::dispatch` maps
+`(method, path, query, headers, body)` to a plain response so any Rust
+web framework can integrate; the `axum` feature ships a ready-made
+`Router` (`activitypub_router`/`mastodon_router`).
+
+The SDK mirrors the Python API (`ActivityPubHandler`, inbox/outbox
+processing, HTTP Signatures, WebFinger/NodeInfo, followers/interactions
+storage, the Mastodon-compatible API, quote support) with idiomatic Rust
+types. See [`src/rust/README.md`](src/rust/README.md) for usage.
 
 ## Quick Start
 
@@ -1814,7 +1841,9 @@ private_key = load_private_key("/path/to/key.pem")
 
 ```bash
 pip install -e ".[test]"
-pytest tests
+make test-python   # Python SDK
+make test-rust     # Rust SDK
+make test          # Both
 ```
 
 ## Development

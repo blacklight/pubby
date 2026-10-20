@@ -3,8 +3,13 @@ PYTHON ?= python
 all:
 	$(PYTHON) -m build
 
-test:
-	$(PYTHON) -m pytest tests/ -v
+test-python:
+	$(PYTHON) -m pytest tests/python -v
+
+test-rust:
+	cargo test --workspace
+
+test: test-python test-rust
 
 .PHONY: docs
 docs:

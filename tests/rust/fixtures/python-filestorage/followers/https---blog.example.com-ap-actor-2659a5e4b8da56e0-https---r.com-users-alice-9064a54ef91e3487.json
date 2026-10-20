@@ -1,0 +1,8 @@
+{
+  "actor_id": "https://r.com/users/alice",
+  "inbox": "https://r.com/users/alice/inbox",
+  "shared_inbox": "",
+  "followed_at": null,
+  "actor_data": {},
+  "target_actor_id": "https://blog.example.com/ap/actor"
+}
