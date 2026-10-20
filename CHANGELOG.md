@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## _Unreleased_
+
+### Fixed
+
+- Isolate release-version tests from the repository changelog so builds still
+  pass after a release consumes the `Unreleased` heading.
+
 ## _0.4.1_
 
 ### Fixed

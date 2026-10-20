@@ -43,7 +43,6 @@ def test_bump_keeps_release_versions_synchronized(tmp_path, part):
         "Cargo.lock",
         "Cargo.toml",
         "tests/rust/Cargo.toml",
-        "CHANGELOG.md",
     ):
         target = tmp_path / filename
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -51,6 +50,9 @@ def test_bump_keeps_release_versions_synchronized(tmp_path, part):
 
     project_path = tmp_path / "pyproject.toml"
     current = read_toml(project_path)["tool"]["bumpversion"]["current_version"]
+    # A release consumes Unreleased in the real changelog, so use a local fixture.
+    changelog = f"# Changelog\n\n## Unreleased\n\n## {current}\n"
+    (tmp_path / "CHANGELOG.md").write_text(changelog)
     major, minor, patch = map(int, current.split("."))
     expected = {
         "patch": f"{major}.{minor}.{patch + 1}",
@@ -79,8 +81,6 @@ def test_bump_keeps_release_versions_synchronized(tmp_path, part):
         filename: (tmp_path / filename).read_bytes()
         for filename in ("Cargo.toml", "tests/rust/Cargo.toml")
     }
-    changelog = (tmp_path / "CHANGELOG.md").read_text()
-
     result = subprocess.run(
         [
             sys.executable,
