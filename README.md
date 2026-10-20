@@ -1854,6 +1854,13 @@ pre-commit install
 pre-commit run --all-files
 ```
 
+Release versions are managed by `bump-my-version` (included in `.[test]`).
+Run `bump-my-version bump patch` (or `minor` / `major`) from the repository
+root with an `Unreleased` changelog section. This updates Python metadata
+and `__version__`, the Rust crate manifest, and only `pubby-sdk` in
+`Cargo.lock`, then commits and tags the release. The unpublished Rust test
+crate stays at `0.0.0`.
+
 ## License
 
 [AGPL-3.0-or-later](https://www.gnu.org/licenses/agpl-3.0.html)

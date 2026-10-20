@@ -26,7 +26,7 @@ db = ["sqlalchemy"]
 fastapi = ["fastapi", "uvicorn"]
 flask = ["flask"]
 tornado = ["tornado"]
-test = ["pytest", "pytest-cov", "sqlalchemy", "flask", "fastapi", "httpx", "tornado"]
+test = ["pytest", "pytest-cov", "sqlalchemy", "flask", "fastapi", "httpx", "tornado", "bump-my-version"]
 dev = ["pre-commit", "black", "flake8"]
 
 [project.urls]
@@ -54,6 +54,21 @@ tag = true
 
 [[tool.bumpversion.files]]
 filename = "src/python/pubby/__init__.py"
+
+[[tool.bumpversion.files]]
+filename = "pyproject.toml"
+search = "[project]\nname = \"pubby\"\nversion = \"{current_version}\""
+replace = "[project]\nname = \"pubby\"\nversion = \"{new_version}\""
+
+[[tool.bumpversion.files]]
+filename = "src/rust/Cargo.toml"
+search = "[package]\nname = \"pubby-sdk\"\nversion = \"{current_version}\""
+replace = "[package]\nname = \"pubby-sdk\"\nversion = \"{new_version}\""
+
+[[tool.bumpversion.files]]
+filename = "Cargo.lock"
+search = "[[package]]\nname = \"pubby-sdk\"\nversion = \"{current_version}\""
+replace = "[[package]]\nname = \"pubby-sdk\"\nversion = \"{new_version}\""
 
 [[tool.bumpversion.files]]
 filename = "CHANGELOG.md"

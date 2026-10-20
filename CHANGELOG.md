@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## _Unreleased_
+
+### Fixed
+
+- Keep Python and Rust release versions synchronized with bumpversion,
+  including the `pubby-sdk` lockfile entry; align the Rust crate with Python
+  at `0.4.0`.
+
 ## _0.4.0_
 
 ### Added
