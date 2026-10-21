@@ -1295,8 +1295,9 @@ fn test_file_storage_reads_python_fixture() {
     assert_eq!(activities.len(), 1);
     assert_eq!(activities[0]["type"], "Create");
 
+    // Verify fixture compatibility regardless of when Python cached the actor.
     let actor = storage
-        .get_cached_actor("https://r.com/users/alice", 86400.0)
+        .get_cached_actor("https://r.com/users/alice", f64::INFINITY)
         .unwrap()
         .unwrap();
     assert_eq!(actor["id"], "https://r.com/users/alice");
