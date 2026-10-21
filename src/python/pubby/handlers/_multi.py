@@ -120,8 +120,41 @@ class MultiActorHandler:
                 return handler
         return self.instance
 
+    def _local_path_from_url(self, url: str) -> Optional[str]:
+        """
+        Path portion of *url* when under the instance base URL (host matched
+        case-insensitively).
+        """
+        base = self.instance.base_url.rstrip("/")
+        if url[: len(base)].lower() == base.lower():
+            return url[len(base) :]
+        return None
+
     def get_webfinger_response(self, resource: str) -> Optional[dict]:
-        """WebFinger for any local actor (instance actor included)."""
+        """
+        WebFinger for any local actor (instance actor included).
+
+        Accepts ``acct:user@domain`` (case-insensitive domain) and URL
+        resources matching a local actor document URL.
+        """
+        if not resource.lower().startswith("acct:"):
+            path = self._local_path_from_url(resource)
+            if path is None:
+                return None
+            if path == self.instance.actor_path:
+                handler = self.instance
+            else:
+                match = self.username_from_path(path)
+                if match is None or match[1]:
+                    return None
+                handler = self.for_username(match[0])
+                if handler is None:
+                    return None
+            return build_webfinger_response(
+                username=handler.username,
+                domain=self.webfinger_domain,
+                actor_url=handler.actor_id,
+            )
         normalized = normalize_webfinger_resource(resource)
         if "@" not in normalized:
             return None

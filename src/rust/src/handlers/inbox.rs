@@ -56,6 +56,80 @@ pub type OnFollowResponse = Arc<dyn Fn(&str, bool) + Send + Sync>;
 /// silently grant a follow.
 pub type FollowPolicyFn = Arc<dyn Fn(&str, &str) -> Option<FollowPolicy> + Send + Sync>;
 
+/// Options for [`InboxProcessor::with_options`] — groups the
+/// constructor's parameters so call sites stay readable.
+pub struct InboxOptions {
+    /// Storage backend.
+    pub storage: Arc<dyn ActivityPubStorage>,
+    /// This server's actor ID (URL).
+    pub actor_id: String,
+    /// RSA private key for signing outgoing Accept responses.
+    pub private_key: rsa::RsaPrivateKey,
+    /// Key ID for HTTP signatures (e.g. `actor_id#main-key`).
+    pub key_id: String,
+    /// Document cache for dereference endpoints.
+    pub document_cache: Option<Arc<DocumentCache>>,
+    /// Optional callback when an interaction is stored.
+    pub on_interaction_received: Option<OnInteractionReceived>,
+    /// User-Agent for outgoing HTTP requests (default derived from
+    /// `actor_id`).
+    pub user_agent: Option<String>,
+    /// Timeout for outgoing HTTP requests.
+    pub http_client: HttpClient,
+    /// Auto-approve quote requests targeting local objects.
+    pub auto_approve_quotes: bool,
+    /// Only store interactions targeting local resources.
+    pub store_local_only: bool,
+    /// Base URLs considered "local". Defaults to the actor's base URL.
+    pub local_base_urls: Vec<String>,
+    /// Allow-list of remote instance domains.
+    pub allowed_instances: Option<Vec<String>>,
+    /// Block-list of remote instance domains.
+    pub blocked_instances: Option<Vec<String>>,
+    /// Validate inbound `Create`/`Update` object attribution.
+    pub strict_attribution: bool,
+    /// Callback deciding how an incoming `Follow` is handled.
+    pub follow_policy: Option<FollowPolicyFn>,
+    /// Hook invoked for every verified inbound activity before the
+    /// built-in dispatch (see [`OnActivityReceived`]).
+    pub on_activity: Option<OnActivityReceived>,
+    /// Callback for `Accept`/`Reject` of this actor's outbound
+    /// `Follow`s — `(target_actor_id, accepted)`.
+    pub on_follow_response: Option<OnFollowResponse>,
+}
+
+impl InboxOptions {
+    /// Create options with the required fields; all optional fields
+    /// default (no callbacks, 15s HTTP timeout, quote auto-approval on,
+    /// attribution checks off).
+    pub fn new(
+        storage: Arc<dyn ActivityPubStorage>,
+        actor_id: impl Into<String>,
+        private_key: rsa::RsaPrivateKey,
+        key_id: impl Into<String>,
+    ) -> Self {
+        InboxOptions {
+            storage,
+            actor_id: actor_id.into(),
+            private_key,
+            key_id: key_id.into(),
+            document_cache: None,
+            on_interaction_received: None,
+            user_agent: None,
+            http_client: HttpClient::new(std::time::Duration::from_secs(15)),
+            auto_approve_quotes: true,
+            store_local_only: false,
+            local_base_urls: Vec::new(),
+            allowed_instances: None,
+            blocked_instances: None,
+            strict_attribution: false,
+            follow_policy: None,
+            on_activity: None,
+            on_follow_response: None,
+        }
+    }
+}
+
 /// Processes incoming ActivityPub activities.
 ///
 /// Dispatches by activity type and performs HTTP signature verification.
@@ -118,25 +192,44 @@ impl InboxProcessor {
         follow_policy: Option<FollowPolicyFn>,
         document_cache: Option<Arc<DocumentCache>>,
     ) -> Self {
-        let actor_id = actor_id.into();
+        let mut opts = InboxOptions::new(storage, actor_id, private_key, key_id);
+        opts.document_cache = document_cache;
+        opts.on_interaction_received = on_interaction_received;
+        opts.user_agent = user_agent;
+        opts.http_client = http_client;
+        opts.auto_approve_quotes = auto_approve_quotes;
+        opts.store_local_only = store_local_only;
+        opts.local_base_urls = local_base_urls;
+        opts.allowed_instances = allowed_instances;
+        opts.blocked_instances = blocked_instances;
+        opts.strict_attribution = strict_attribution;
+        opts.follow_policy = follow_policy;
+        Self::with_options(opts)
+    }
+
+    /// Create an inbox processor from an [`InboxOptions`] struct.
+    pub fn with_options(opts: InboxOptions) -> Self {
+        let actor_id = opts.actor_id;
         InboxProcessor {
-            storage,
-            actor_id: actor_id.clone(),
-            document_cache,
-            private_key,
-            key_id: key_id.into(),
-            on_interaction_received,
-            http_client,
-            user_agent: user_agent.unwrap_or_else(|| get_default_user_agent(&actor_id)),
-            auto_approve_quotes,
-            store_local_only,
-            local_base_urls,
-            allowed_instances,
-            blocked_instances,
-            strict_attribution,
-            follow_policy,
-            on_activity: None,
-            on_follow_response: None,
+            storage: opts.storage,
+            document_cache: opts.document_cache,
+            private_key: opts.private_key,
+            key_id: opts.key_id,
+            on_interaction_received: opts.on_interaction_received,
+            http_client: opts.http_client,
+            user_agent: opts
+                .user_agent
+                .unwrap_or_else(|| get_default_user_agent(&actor_id)),
+            auto_approve_quotes: opts.auto_approve_quotes,
+            store_local_only: opts.store_local_only,
+            local_base_urls: opts.local_base_urls,
+            allowed_instances: opts.allowed_instances,
+            blocked_instances: opts.blocked_instances,
+            strict_attribution: opts.strict_attribution,
+            follow_policy: opts.follow_policy,
+            on_activity: opts.on_activity,
+            on_follow_response: opts.on_follow_response,
+            actor_id,
         }
     }
 

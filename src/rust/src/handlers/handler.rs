@@ -226,11 +226,14 @@ impl ActivityPubHandler {
         let actor_also_known_as = actor_config.also_known_as.clone();
 
         let actor_id = format!("{base_url}{actor_path}");
-        let inbox_url = format!("{base_url}/ap/inbox");
-        let outbox_url = format!("{base_url}/ap/outbox");
-        let followers_url = format!("{base_url}/ap/followers");
-        let following_url = format!("{base_url}/ap/following");
-        let shared_inbox_url = inbox_url.clone();
+        let url_for = |path: &Option<String>, default: &str| {
+            format!("{}{}", base_url, path.as_deref().unwrap_or(default))
+        };
+        let inbox_url = url_for(&actor_config.inbox_path, "/ap/inbox");
+        let outbox_url = url_for(&actor_config.outbox_path, "/ap/outbox");
+        let followers_url = url_for(&actor_config.followers_path, "/ap/followers");
+        let following_url = url_for(&actor_config.following_path, "/ap/following");
+        let shared_inbox_url = format!("{base_url}/ap/inbox");
         let key_id = format!("{actor_id}#main-key");
 
         let webfinger_domain = options
@@ -263,25 +266,26 @@ impl ActivityPubHandler {
             }
         });
 
-        let mut inbox = InboxProcessor::new(
+        let mut inbox_opts = super::inbox::InboxOptions::new(
             storage.clone(),
             actor_id.clone(),
             private_key.clone(),
             key_id.clone(),
-            options.on_interaction_received.clone(),
-            options.user_agent.clone(),
-            http_client.clone(),
-            options.auto_approve_quotes,
-            options.store_local_only,
-            options.local_base_urls.clone(),
-            options.allowed_instances.clone(),
-            options.blocked_instances.clone(),
-            options.strict_attribution,
-            follow_policy,
-            options.document_cache.clone(),
         );
-        inbox.on_activity = options.on_activity.clone();
-        inbox.on_follow_response = options.on_follow_response.clone();
+        inbox_opts.on_interaction_received = options.on_interaction_received.clone();
+        inbox_opts.user_agent = options.user_agent.clone();
+        inbox_opts.http_client = http_client.clone();
+        inbox_opts.auto_approve_quotes = options.auto_approve_quotes;
+        inbox_opts.store_local_only = options.store_local_only;
+        inbox_opts.local_base_urls = options.local_base_urls.clone();
+        inbox_opts.allowed_instances = options.allowed_instances.clone();
+        inbox_opts.blocked_instances = options.blocked_instances.clone();
+        inbox_opts.strict_attribution = options.strict_attribution;
+        inbox_opts.follow_policy = follow_policy;
+        inbox_opts.document_cache = options.document_cache.clone();
+        inbox_opts.on_activity = options.on_activity.clone();
+        inbox_opts.on_follow_response = options.on_follow_response.clone();
+        let inbox = InboxProcessor::with_options(inbox_opts);
 
         let outbox = OutboxProcessor {
             storage: storage.clone(),
@@ -413,8 +417,9 @@ impl ActivityPubHandler {
 
     /// Get the outbox collection (defaults: `limit=20`, `offset=0`).
     pub fn get_outbox(&self, limit: Option<usize>, offset: Option<usize>) -> Result<Value> {
-        super::outbox::get_outbox_collection(
+        super::outbox::get_outbox_collection_for_actor(
             self.storage.as_ref(),
+            &self.actor_id,
             &self.outbox_url,
             limit.unwrap_or(20),
             offset.unwrap_or(0),
@@ -494,24 +499,31 @@ impl ActivityPubHandler {
         Ok(ordered_collection(&self.followers_url, &items, None))
     }
 
-    /// Build the following OrderedCollection (empty for blogs).
+    /// Build the following OrderedCollection — populated when the
+    /// storage backend tracks outbound follows
+    /// (`get_following`), empty otherwise.
     pub fn get_following_collection(&self) -> Result<Value> {
-        Ok(ordered_collection(&self.following_url, &[], None))
+        let following = self.storage.get_following(&self.actor_id, 1000, 0)?;
+        let items: Vec<Value> = following.iter().map(|id| json!(id)).collect();
+        Ok(ordered_collection(&self.following_url, &items, None))
     }
 
     // ---------- Discovery ----------
 
     /// Whether `resource` is a spelling of this actor's `acct:` URI that
     /// [`get_webfinger_response`](Self::get_webfinger_response) accepts.
+    /// Also accepts URL resources matching the actor document URL or the
+    /// configured profile `url` (when it differs from `base_url`).
     pub fn is_valid_webfinger_resource(&self, resource: Option<&str>) -> bool {
         let Some(resource) = resource else {
             return true;
         };
-        let mut normalized = resource;
-        if !normalized.to_lowercase().starts_with("acct:") {
-            return false;
+        if !resource.to_lowercase().starts_with("acct:") {
+            return resource.eq_ignore_ascii_case(&self.actor_id)
+                || (self.actor_url != self.base_url
+                    && resource.eq_ignore_ascii_case(&self.actor_url));
         }
-        normalized = &normalized[5..];
+        let mut normalized = &resource[5..];
         if let Some(rest) = normalized.strip_prefix('@') {
             normalized = rest;
         }

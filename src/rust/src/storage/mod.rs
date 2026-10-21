@@ -51,6 +51,12 @@ pub trait ActivityPubStorage: Send + Sync {
             .collect())
     }
 
+    /// Actor IDs this actor follows, newest first. Default: empty —
+    /// backends that track outbound follows override.
+    fn get_following(&self, _actor_id: &str, _limit: usize, _offset: usize) -> Result<Vec<String>> {
+        Ok(Vec::new())
+    }
+
     // ---------- Follow requests (pending approvals) ----------
 
     /// Store or update a pending follow request. Backends without pending

@@ -166,10 +166,14 @@ class ActivityPubHandler:
 
         # Derived URLs
         self.actor_id = f"{self.base_url}{self.actor_path}"
-        self.inbox_url = f"{self.base_url}/ap/inbox"
-        self.outbox_url = f"{self.base_url}/ap/outbox"
-        self.followers_url = f"{self.base_url}/ap/followers"
-        self.following_url = f"{self.base_url}/ap/following"
+        self.inbox_url = f"{self.base_url}{actor_config.inbox_path or '/ap/inbox'}"
+        self.outbox_url = f"{self.base_url}{actor_config.outbox_path or '/ap/outbox'}"
+        self.followers_url = (
+            f"{self.base_url}{actor_config.followers_path or '/ap/followers'}"
+        )
+        self.following_url = (
+            f"{self.base_url}{actor_config.following_path or '/ap/following'}"
+        )
         self.shared_inbox_url = f"{self.base_url}/ap/inbox"
         self.key_id = f"{self.actor_id}#main-key"
 
@@ -348,8 +352,8 @@ class ActivityPubHandler:
         :param offset: Pagination offset.
         :return: An OrderedCollection dictionary.
         """
-        return self.outbox.get_outbox_collection(
-            self.outbox_url, limit=limit, offset=offset
+        return self.outbox.get_outbox_collection_for_actor(
+            self.outbox_url, self.actor_id, limit=limit, offset=offset
         )
 
     # ---------- Actor ----------
@@ -449,11 +453,14 @@ class ActivityPubHandler:
 
     def get_following_collection(self) -> dict:
         """
-        Build the following OrderedCollection (empty for blogs).
+        Build the following OrderedCollection — populated when the
+        storage backend tracks outbound follows (``get_following``),
+        empty otherwise.
 
         :return: The following collection dictionary.
         """
-        return ordered_collection(self.following_url, [])
+        following = self.storage.get_following(self.actor_id, limit=1000)
+        return ordered_collection(self.following_url, following)
 
     # ---------- Discovery ----------
 
@@ -471,10 +478,14 @@ class ActivityPubHandler:
         """
         if resource is None:
             return True
-        normalized = resource
-        if not normalized.lower().startswith("acct:"):
-            return False
-        normalized = normalized[5:]
+        if not resource.lower().startswith("acct:"):
+            # URL resources: the actor document URL or the configured
+            # profile URL (when it differs from the base URL).
+            return resource.lower() == self.actor_id.lower() or (
+                self.actor_url != self.base_url
+                and resource.lower() == self.actor_url.lower()
+            )
+        normalized = resource[5:]
         if normalized.startswith("@"):
             normalized = normalized[1:]
         expected = f"{self.username}@{self.webfinger_domain}"

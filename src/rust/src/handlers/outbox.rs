@@ -926,6 +926,11 @@ impl DeliveryContext {
 }
 
 /// Build the outbox `OrderedCollection` response.
+///
+/// Unscoped: returns every stored activity. Prefer
+/// [`get_outbox_collection_for_actor`] — it scopes to a single actor,
+/// which is what per-actor outbox routes need in multi-actor
+/// deployments.
 pub fn get_outbox_collection(
     storage: &dyn ActivityPubStorage,
     collection_url: &str,
@@ -933,6 +938,27 @@ pub fn get_outbox_collection(
     offset: usize,
 ) -> Result<Value> {
     let activities = storage.get_activities(limit, offset)?;
+    Ok(json!({
+        "@context": ap_context(),
+        "id": collection_url,
+        "type": "OrderedCollection",
+        "totalItems": activities.len(),
+        "orderedItems": activities,
+    }))
+}
+
+/// Build the outbox `OrderedCollection` for a single actor — the form
+/// used by [`ActivityPubHandler::get_outbox`](crate::handlers::ActivityPubHandler::get_outbox)
+/// so that per-actor outboxes in multi-actor deployments only contain
+/// their own activities.
+pub fn get_outbox_collection_for_actor(
+    storage: &dyn ActivityPubStorage,
+    actor_id: &str,
+    collection_url: &str,
+    limit: usize,
+    offset: usize,
+) -> Result<Value> {
+    let activities = storage.get_activities_for_actor(actor_id, limit, offset)?;
     Ok(json!({
         "@context": ap_context(),
         "id": collection_url,

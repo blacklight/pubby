@@ -229,6 +229,10 @@ class ActorConfig:
     featured: str | None = None
     moved_to: str | None = None
     also_known_as: list[str] = field(default_factory=list)
+    inbox_path: str | None = None
+    outbox_path: str | None = None
+    followers_path: str | None = None
+    following_path: str | None = None
 
     def __post_init__(self) -> None:
         self.base_url = self.base_url.rstrip("/")
@@ -253,6 +257,10 @@ class ActorConfig:
             featured=d.get("featured"),
             moved_to=d.get("moved_to"),
             also_known_as=d.get("also_known_as") or [],
+            inbox_path=d.get("inbox_path"),
+            outbox_path=d.get("outbox_path"),
+            followers_path=d.get("followers_path"),
+            following_path=d.get("following_path"),
         )
 
 

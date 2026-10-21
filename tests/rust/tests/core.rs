@@ -28,8 +28,10 @@ fn make_config() -> ActorConfig {
 fn make_handler(dir: &tempfile::TempDir) -> Arc<ActivityPubHandler> {
     let storage = Arc::new(FileActivityPubStorage::new(dir.path(), true).unwrap());
     let (priv_key, _) = generate_rsa_keypair(2048).unwrap();
-    let mut opts = HandlerOptions::default();
-    opts.async_delivery = false;
+    let opts = HandlerOptions {
+        async_delivery: false,
+        ..HandlerOptions::default()
+    };
     Arc::new(ActivityPubHandler::new(storage, make_config(), priv_key, opts).unwrap())
 }
 
@@ -1301,4 +1303,272 @@ fn test_file_storage_reads_python_fixture() {
         .unwrap()
         .unwrap();
     assert_eq!(actor["id"], "https://r.com/users/alice");
+}
+
+// ---------- 0.5.1: per-actor endpoint paths, scoped outbox, following
+// seam, WebFinger URL resources, InboxOptions ----------
+
+#[test]
+fn test_actor_config_endpoint_paths() {
+    let cfg = ActorConfig::from_json(&json!({
+        "base_url": "https://blog.example.com",
+        "username": "alice",
+        "actor_path": "/ap/users/alice",
+        "inbox_path": "/ap/users/alice/inbox",
+        "outbox_path": "/ap/users/alice/outbox",
+        "followers_path": "/ap/users/alice/followers",
+        "following_path": "/ap/users/alice/following",
+    }))
+    .unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let storage = Arc::new(FileActivityPubStorage::new(dir.path(), true).unwrap());
+    let (priv_key, _) = generate_rsa_keypair(2048).unwrap();
+    let h = ActivityPubHandler::new(storage, cfg, priv_key, HandlerOptions::default()).unwrap();
+
+    assert_eq!(h.inbox_url, "https://blog.example.com/ap/users/alice/inbox");
+    assert_eq!(
+        h.outbox_url,
+        "https://blog.example.com/ap/users/alice/outbox"
+    );
+    assert_eq!(
+        h.followers_url,
+        "https://blog.example.com/ap/users/alice/followers"
+    );
+    assert_eq!(
+        h.following_url,
+        "https://blog.example.com/ap/users/alice/following"
+    );
+    // The shared inbox always stays on the prefix route.
+    assert_eq!(h.shared_inbox_url, "https://blog.example.com/ap/inbox");
+
+    let doc = h.get_actor_document();
+    assert_eq!(doc["inbox"], h.inbox_url);
+    assert_eq!(doc["outbox"], h.outbox_url);
+    assert_eq!(doc["followers"], h.followers_url);
+    assert_eq!(doc["following"], h.following_url);
+    assert_eq!(doc["endpoints"]["sharedInbox"], h.shared_inbox_url);
+}
+
+#[test]
+fn test_actor_config_endpoint_paths_default_unchanged() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = make_handler(&dir);
+    assert_eq!(h.inbox_url, "https://blog.example.com/ap/inbox");
+    assert_eq!(h.outbox_url, "https://blog.example.com/ap/outbox");
+    assert_eq!(h.followers_url, "https://blog.example.com/ap/followers");
+    assert_eq!(h.following_url, "https://blog.example.com/ap/following");
+}
+
+#[test]
+fn test_outbox_is_actor_scoped() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = make_handler(&dir);
+    h.storage
+        .store_activity(
+            "https://blog.example.com/ap/actor/activities/1",
+            &json!({
+                "id": "https://blog.example.com/ap/actor/activities/1",
+                "type": "Create",
+                "actor": "https://blog.example.com/ap/actor",
+            }),
+        )
+        .unwrap();
+    h.storage
+        .store_activity(
+            "https://blog.example.com/ap/users/bob/activities/2",
+            &json!({
+                "id": "https://blog.example.com/ap/users/bob/activities/2",
+                "type": "Create",
+                "actor": "https://blog.example.com/ap/users/bob",
+            }),
+        )
+        .unwrap();
+
+    let outbox = h.get_outbox(None, None).unwrap();
+    let items = outbox["orderedItems"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(
+        items[0]["id"],
+        "https://blog.example.com/ap/actor/activities/1"
+    );
+}
+
+/// Storage wrapper that returns a populated `following` list — verifies
+/// the handler renders the storage-provided items.
+struct FollowingStorage {
+    inner: FileActivityPubStorage,
+    following: Vec<String>,
+}
+
+impl ActivityPubStorage for FollowingStorage {
+    fn store_follower(&self, f: &Follower) -> Result<()> {
+        self.inner.store_follower(f)
+    }
+    fn remove_follower(&self, actor_id: &str, target: &str) -> Result<()> {
+        self.inner.remove_follower(actor_id, target)
+    }
+    fn get_followers(&self, actor_id: Option<&str>) -> Result<Vec<Follower>> {
+        self.inner.get_followers(actor_id)
+    }
+    fn get_following(&self, _a: &str, _l: usize, _o: usize) -> Result<Vec<String>> {
+        Ok(self.following.clone())
+    }
+    fn store_interaction(&self, i: &Interaction) -> Result<()> {
+        self.inner.store_interaction(i)
+    }
+    fn delete_interaction(&self, a: &str, t: &str, ty: InteractionType) -> Result<()> {
+        self.inner.delete_interaction(a, t, ty)
+    }
+    fn get_interactions(
+        &self,
+        t: &str,
+        ty: Option<InteractionType>,
+        s: InteractionStatus,
+    ) -> Result<Vec<Interaction>> {
+        self.inner.get_interactions(t, ty, s)
+    }
+    fn store_activity(&self, id: &str, data: &Value) -> Result<()> {
+        self.inner.store_activity(id, data)
+    }
+    fn get_activities(&self, l: usize, o: usize) -> Result<Vec<Value>> {
+        self.inner.get_activities(l, o)
+    }
+    fn cache_remote_actor(
+        &self,
+        id: &str,
+        data: &Value,
+        fetched: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<()> {
+        self.inner.cache_remote_actor(id, data, fetched)
+    }
+    fn get_cached_actor(&self, id: &str, age: f64) -> Result<Option<Value>> {
+        self.inner.get_cached_actor(id, age)
+    }
+}
+
+#[test]
+fn test_following_collection() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = make_handler(&dir);
+    // Default storage: empty following collection (back-compat).
+    let coll = h.get_following_collection().unwrap();
+    assert_eq!(coll["type"], "OrderedCollection");
+    assert_eq!(coll["totalItems"], 0);
+
+    // Overridden storage: items flow into the collection.
+    let storage = Arc::new(FollowingStorage {
+        inner: FileActivityPubStorage::new(dir.path(), true).unwrap(),
+        following: vec![
+            "https://r.com/users/alice".to_string(),
+            "https://r.com/users/bob".to_string(),
+        ],
+    });
+    let (priv_key, _) = generate_rsa_keypair(2048).unwrap();
+    let h2 = ActivityPubHandler::new(storage, make_config(), priv_key, HandlerOptions::default())
+        .unwrap();
+    let coll2 = h2.get_following_collection().unwrap();
+    assert_eq!(coll2["totalItems"], 2);
+    assert_eq!(coll2["orderedItems"][1], "https://r.com/users/bob");
+}
+
+#[test]
+fn test_webfinger_url_resources() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = make_handler(&dir);
+    let actor_url = "https://blog.example.com/ap/actor";
+
+    // acct: forms still work (unchanged).
+    assert!(h.is_valid_webfinger_resource(Some("acct:blog@blog.example.com")));
+    assert!(h.is_valid_webfinger_resource(Some("acct:@blog@blog.example.com")));
+
+    // URL resource matching the actor document URL.
+    assert!(h.is_valid_webfinger_resource(Some(actor_url)));
+    let jrd = h.get_webfinger_response(Some(actor_url)).unwrap();
+    assert_eq!(jrd["subject"], "acct:blog@blog.example.com");
+
+    // Foreign URLs and unrelated local URLs are rejected.
+    assert!(!h.is_valid_webfinger_resource(Some("https://other.example.com/ap/actor")));
+    assert!(!h.is_valid_webfinger_resource(Some("https://blog.example.com/ap/users/bob")));
+}
+
+#[test]
+fn test_multi_webfinger_url_resources() {
+    let dir = tempfile::tempdir().unwrap();
+    let instance = make_handler(&dir);
+    let bob_storage = Arc::new(FileActivityPubStorage::new(dir.path(), true).unwrap());
+    let (bob_key, _) = generate_rsa_keypair(2048).unwrap();
+    let bob_cfg = ActorConfig::from_json(&json!({
+        "base_url": "https://blog.example.com",
+        "username": "bob",
+        "actor_path": "/ap/users/bob",
+    }))
+    .unwrap();
+    let bob = Arc::new(
+        ActivityPubHandler::new(bob_storage, bob_cfg, bob_key, HandlerOptions::default()).unwrap(),
+    );
+    let bob_c = bob.clone();
+    let multi = MultiActorHandler::new(
+        instance,
+        Arc::new(move |u: &str| {
+            Ok(if u.eq_ignore_ascii_case("bob") {
+                Some(bob_c.clone())
+            } else {
+                None
+            })
+        }),
+        "/ap/users/{username}",
+    );
+
+    let jrd = multi
+        .get_webfinger_response(Some("https://blog.example.com/ap/users/bob"))
+        .unwrap();
+    assert_eq!(jrd["subject"], "acct:bob@blog.example.com");
+
+    // The instance actor's own URL resolves too.
+    let jrd = multi
+        .get_webfinger_response(Some("https://blog.example.com/ap/actor"))
+        .unwrap();
+    assert_eq!(jrd["subject"], "acct:blog@blog.example.com");
+
+    // Unknown user / foreign URL / sub-path → None.
+    assert!(multi
+        .get_webfinger_response(Some("https://blog.example.com/ap/users/carol"))
+        .is_none());
+    assert!(multi
+        .get_webfinger_response(Some("https://other.example.com/ap/users/bob"))
+        .is_none());
+    assert!(multi
+        .get_webfinger_response(Some("https://blog.example.com/ap/users/bob/outbox"))
+        .is_none());
+}
+
+#[test]
+fn test_inbox_options_with_options() {
+    use pubby_sdk::handlers::{InboxOptions, InboxProcessor};
+    use std::time::Duration;
+
+    let dir = tempfile::tempdir().unwrap();
+    let storage = Arc::new(FileActivityPubStorage::new(dir.path(), true).unwrap());
+    let (priv_key, _) = generate_rsa_keypair(2048).unwrap();
+
+    let mut opts = InboxOptions::new(
+        storage.clone(),
+        "https://blog.example.com/ap/actor",
+        priv_key.clone(),
+        "https://blog.example.com/ap/actor#main-key",
+    );
+    opts.strict_attribution = true;
+    opts.auto_approve_quotes = false;
+    opts.blocked_instances = Some(vec!["bad.example".to_string()]);
+    opts.http_client = pubby_sdk::http::HttpClient::new(Duration::from_secs(5));
+    let proc = InboxProcessor::with_options(opts);
+    assert_eq!(proc.actor_id, "https://blog.example.com/ap/actor");
+    assert!(proc.strict_attribution);
+    assert!(!proc.auto_approve_quotes);
+    assert_eq!(
+        proc.blocked_instances,
+        Some(vec!["bad.example".to_string()])
+    );
+    // user_agent defaulted from the actor id.
+    assert!(!proc.user_agent.is_empty());
 }

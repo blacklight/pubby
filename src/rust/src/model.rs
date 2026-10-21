@@ -481,6 +481,15 @@ pub struct ActorConfig {
     pub moved_to: Option<String>,
     /// `alsoKnownAs` — alias actor URLs.
     pub also_known_as: Vec<String>,
+    /// Inbox URL path (default `/ap/inbox`). Multi-actor hosts set a
+    /// per-actor path such as `/ap/users/{username}/inbox`.
+    pub inbox_path: Option<String>,
+    /// Outbox URL path (default `/ap/outbox`).
+    pub outbox_path: Option<String>,
+    /// Followers collection path (default `/ap/followers`).
+    pub followers_path: Option<String>,
+    /// Following collection path (default `/ap/following`).
+    pub following_path: Option<String>,
 }
 
 impl ActorConfig {
@@ -501,6 +510,10 @@ impl ActorConfig {
             featured: None,
             moved_to: None,
             also_known_as: Vec::new(),
+            inbox_path: None,
+            outbox_path: None,
+            followers_path: None,
+            following_path: None,
         };
         cfg.normalize();
         cfg
@@ -548,6 +561,22 @@ impl ActorConfig {
                 .and_then(|v| v.as_str())
                 .map(String::from),
             also_known_as: str_list(data.get("also_known_as")),
+            inbox_path: data
+                .get("inbox_path")
+                .and_then(|v| v.as_str())
+                .map(String::from),
+            outbox_path: data
+                .get("outbox_path")
+                .and_then(|v| v.as_str())
+                .map(String::from),
+            followers_path: data
+                .get("followers_path")
+                .and_then(|v| v.as_str())
+                .map(String::from),
+            following_path: data
+                .get("following_path")
+                .and_then(|v| v.as_str())
+                .map(String::from),
         };
         cfg.normalize();
         Ok(cfg)

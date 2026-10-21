@@ -1225,3 +1225,33 @@ class OutboxProcessor:
             "totalItems": len(activities),
             "orderedItems": activities,
         }
+
+    def get_outbox_collection_for_actor(
+        self,
+        collection_url: str,
+        actor_id: str,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> dict:
+        """
+        Build the outbox OrderedCollection for a single actor — used by
+        :meth:`ActivityPubHandler.get_outbox` so that per-actor outboxes
+        in multi-actor deployments only contain their own activities.
+
+        :param collection_url: The outbox collection URL.
+        :param actor_id: The actor to scope activities to.
+        :param limit: Maximum items per page.
+        :param offset: Pagination offset.
+        :return: An OrderedCollection JSON-LD dictionary.
+        """
+        activities = self.storage.get_activities_for_actor(
+            actor_id, limit=limit, offset=offset
+        )
+
+        return {
+            "@context": AP_CONTEXT,
+            "id": collection_url,
+            "type": "OrderedCollection",
+            "totalItems": len(activities),
+            "orderedItems": activities,
+        }

@@ -838,6 +838,15 @@ handler = ActivityPubHandler(storage=storage, actor_config=config, ...)
 | `type` | `str` | `"Person"` | ActivityPub actor type (`Person`, `Application`, `Service`) |
 | `manually_approves_followers` | `bool` | `False` | Advertise `manuallyApprovesFollowers` on the actor document and hold incoming `Follow`s for manual approval (see Follow approval policies) |
 | `attachment` | `list[dict]` | `[]` | Profile metadata fields (see below) |
+| `url` | `str \| None` | `None` | Human-readable profile URL used as the actor's `url` |
+| `liked` | `str \| None` | `None` | Liked collection URL advertised as `liked` |
+| `featured` | `str \| None` | `None` | Featured (pinned posts) collection URL advertised as `featured` |
+| `moved_to` | `str \| None` | `None` | Actor URL this account moved to (`movedTo`) |
+| `also_known_as` | `list[str]` | `[]` | Alias actor URLs (`alsoKnownAs`) |
+| `inbox_path` | `str \| None` | `"/ap/inbox"` | Inbox URL path — set per-actor paths such as `/ap/users/{username}/inbox` in multi-actor deployments |
+| `outbox_path` | `str \| None` | `"/ap/outbox"` | Outbox URL path |
+| `followers_path` | `str \| None` | `"/ap/followers"` | Followers collection URL path |
+| `following_path` | `str \| None` | `"/ap/following"` | Following collection URL path |
 
 #### Profile Metadata (Verified Links)
 

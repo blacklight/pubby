@@ -143,12 +143,41 @@ impl MultiActorHandler {
         Ok(None)
     }
 
+    /// Path portion of `url` when it is under the instance base URL
+    /// (host matched case-insensitively).
+    fn local_path_from_url<'a>(&self, url: &'a str) -> Option<&'a str> {
+        let base = self.instance.base_url.trim_end_matches('/');
+        if url.len() >= base.len() && url[..base.len()].eq_ignore_ascii_case(base) {
+            Some(&url[base.len()..])
+        } else {
+            None
+        }
+    }
+
     /// WebFinger for any local actor (instance actor included).
     ///
     /// Accepts `acct:user@domain`, `acct:@user@domain`, and the instance
-    /// actor's `acct:` — all case-insensitive on the domain.
+    /// actor's `acct:` — all case-insensitive on the domain — plus URL
+    /// resources matching a local actor document URL.
     pub fn get_webfinger_response(&self, resource: Option<&str>) -> Option<Value> {
         let resource = resource?;
+        if !resource.to_lowercase().starts_with("acct:") {
+            let path = self.local_path_from_url(resource)?;
+            let handler = if path == self.instance.actor_path {
+                self.instance.clone()
+            } else {
+                let (username, sub) = self.username_from_path(path)?;
+                if !sub.is_empty() {
+                    return None;
+                }
+                self.for_username(username).ok().flatten()?
+            };
+            return Some(build_webfinger_response(
+                &handler.username,
+                &self.webfinger_domain,
+                &handler.actor_id,
+            ));
+        }
         let normalized = crate::cache::normalize_webfinger_resource(resource);
         let (username, domain) = normalized.split_once('@')?;
         if !domain.eq_ignore_ascii_case(&self.webfinger_domain) {

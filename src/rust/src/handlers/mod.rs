@@ -10,8 +10,8 @@ pub mod outbox;
 pub use discovery::{NodeInfoStats, NodeInfoStatsFn};
 pub use handler::{ActivityPubHandler, HandlerOptions};
 pub use inbox::{
-    ActivityDisposition, FollowPolicyFn, InboxProcessor, OnActivityReceived, OnFollowResponse,
-    OnInteractionReceived,
+    ActivityDisposition, FollowPolicyFn, InboxOptions, InboxProcessor, OnActivityReceived,
+    OnFollowResponse, OnInteractionReceived,
 };
 pub use multi::{ActorResolver, MultiActorHandler};
 pub use outbox::{DeliverFn, DeliveryOutcome, OnDeliveryResult, OutboxProcessor};

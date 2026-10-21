@@ -87,6 +87,25 @@ class ActivityPubStorage(ABC):
         wanted = set(target_ids)
         return [f for f in self.get_followers() if f.target_actor_id in wanted]
 
+    def get_following(
+        self,
+        actor_id: str,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[str]:
+        """
+        Retrieve the actor IDs this actor follows, newest first.
+
+        Default: empty — backends that track outbound follows should
+        override.
+
+        :param actor_id: The local actor URL.
+        :param limit: Maximum number of results.
+        :param offset: Pagination offset.
+        :return: A list of followed actor URLs.
+        """
+        return []
+
     # ---------- Follow requests (pending approvals) ----------
 
     def store_follow_request(self, request: FollowRequest) -> Any:

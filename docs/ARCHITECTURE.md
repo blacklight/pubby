@@ -318,10 +318,10 @@ Public methods:
 | `publish_activity(activity)` | Publish a pre-built activity dict as-is (Like, Undo, Announce, Follow, etc.). |
 | `publish_actor_update(document=None)` | Push the actor profile to all followers; accepts an optional prebuilt actor document. |
 | `get_actor_document()` | Build the actor's JSON-LD representation. |
-| `get_outbox()` | Return the outbox `OrderedCollection`. |
+| `get_outbox()` | Return the outbox `OrderedCollection`, scoped to this actor's activities (`get_activities_for_actor`). |
 | `get_followers_collection(actor_id=None)` | Return the followers `OrderedCollection`, optionally filtered by actor. |
-| `get_following_collection()` | Return the (empty) following `OrderedCollection`. |
-| `get_webfinger_response(resource)` | Build the WebFinger JRD response. |
+| `get_following_collection()` | Return the following `OrderedCollection` — populated when storage implements `get_following()`, empty otherwise. |
+| `get_webfinger_response(resource)` | Build the WebFinger JRD response; accepts `acct:` URIs and the actor's own URL (document URL or configured profile `url`). |
 | `get_nodeinfo_discovery()` | Build the `.well-known/nodeinfo` document. |
 | `get_nodeinfo_document()` | Build the NodeInfo 2.1 document. |
 | `get_quote_authorization(id)` | Retrieve a stored `QuoteAuthorization`. |
@@ -470,17 +470,21 @@ Defines the contract every storage backend must fulfill:
 
 | Group | Methods |
 |-------|---------|
-| **Followers** | `store_follower()`, `remove_follower(actor_id, target_actor_id="")`, `get_followers(actor_id=None)`, `get_followers_of_targets(target_ids)` |
+| **Followers** | `store_follower()`, `remove_follower(actor_id, target_actor_id="")`, `get_followers(actor_id=None)`, `get_followers_of_targets(target_ids)`, `get_following(actor_id, limit, offset)` |
 | **Follow requests** | `store_follow_request()`, `get_follow_requests(target_actor_id=None)`, `get_follow_request(actor_id, target_actor_id)`, `remove_follow_request(actor_id, target_actor_id="")` |
 | **Interactions** | `store_interaction()`, `delete_interaction()`, `delete_interaction_by_object_id()`, `get_interactions()`, `get_interaction_by_object_id()` |
-| **Activities** | `store_activity()`, `get_activities()` |
+| **Activities** | `store_activity()`, `get_activities()`, `get_activities_for_actor(actor_id, limit, offset)` |
 | **Actor cache** | `cache_remote_actor()`, `get_cached_actor()` |
 | **Quote authorizations** | `store_quote_authorization()`, `get_quote_authorization()` |
 
 `delete_interaction_by_object_id()`, `get_followers_of_targets()`, the
-quote-authorization methods and the follow-request methods have default
-(no-op/fallback) implementations so existing custom backends don't break
-when Pubby adds new features.
+quote-authorization methods, the follow-request methods,
+`get_activities_for_actor()` (filters `get_activities()`) and
+`get_following()` (empty list) have default implementations so existing
+custom backends don't break when Pubby adds new features; backends
+should override `get_activities_for_actor()` and `get_following()` with
+indexed queries when the underlying store tracks outbound activities
+per actor or outbound follows.
 `get_followers_of_targets(target_ids)` returns followers whose
 `target_actor_id` is one of the given local target URLs — actor URLs or
 object ids (object-scoped follows, e.g. Friendica thread subscriptions);

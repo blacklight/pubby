@@ -2,11 +2,42 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `ActorConfig` gains optional `inbox_path`/`outbox_path`/
+  `followers_path`/`following_path` fields (both SDKs): multi-actor
+  hosts advertise per-actor endpoint URLs in actor documents; defaults
+  keep the `/ap/*` routes unchanged for single-actor deployments.
+- Storage: `get_following(actor_id, limit, offset)` with an
+  empty-default implementation on the trait/ABC — backends tracking
+  outbound follows override it, and `get_following_collection()`
+  renders the results.
+- WebFinger accepts URL resources: `get_webfinger_response` and
+  `is_valid_webfinger_resource` resolve the actor document URL (and the
+  configured profile `url`) in addition to `acct:` URIs, single- and
+  multi-actor alike.
+- Rust: `InboxOptions` + `InboxProcessor::with_options` group the
+  processor's constructor parameters; `InboxProcessor::new` delegates
+  to it and remains for compatibility.
+- `get_outbox_collection_for_actor` (both SDKs) building an outbox
+  `OrderedCollection` scoped to a single actor.
+
+### Fixed
+
+- `ActivityPubHandler::get_outbox` now returns only the configured
+  actor's activities via `get_activities_for_actor` — under
+  `dispatch_multi`, `{tpl}/outbox` no longer leaks other local actors'
+  activities. Single-actor output is unchanged.
+
 ## 0.5.1
+
+### Changed
 
 - Minor LINT/style fixes.
 
-## _0.5.0_
+## 0.5.0
 
 ### Added
 
@@ -51,21 +82,21 @@ All notable changes to this project will be documented in this file.
   `pubby._http.is_safe_outbound_url`, matching the Rust SDK's guard;
   `resolve_actor_inbox` accepts `allow_private_targets` for tests.
 
-## _0.4.3_
+## 0.4.3
 
 ### Fixed
 
 - Make the Rust Python-fixture compatibility test independent of cache age so
   the checked-in actor fixture does not expire during CI.
 
-## _0.4.2_
+## 0.4.2
 
 ### Fixed
 
 - Isolate release-version tests from the repository changelog so builds still
   pass after a release consumes the `0.4.2` heading.
 
-## _0.4.1_
+## 0.4.1
 
 ### Fixed
 
@@ -73,7 +104,7 @@ All notable changes to this project will be documented in this file.
   including the `pubby-sdk` lockfile entry; align the Rust crate with Python
   at `0.4.0`.
 
-## _0.4.0_
+## 0.4.0
 
 ### Added
 
