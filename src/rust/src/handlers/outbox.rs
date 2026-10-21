@@ -837,7 +837,15 @@ impl DeliveryContext {
         }
     }
 
-    fn report(&self, inbox_url: &str, activity: &Value, ok: bool, status: Option<u16>, error: Option<String>, attempt: usize) {
+    fn report(
+        &self,
+        inbox_url: &str,
+        activity: &Value,
+        ok: bool,
+        status: Option<u16>,
+        error: Option<String>,
+        attempt: usize,
+    ) {
         if let Some(cb) = &self.on_delivery_result {
             let outcome = DeliveryOutcome {
                 inbox_url: inbox_url.to_string(),
@@ -872,7 +880,14 @@ impl DeliveryContext {
                     );
                 }
                 Err(e) => {
-                    self.report(inbox_url, activity, false, None, Some(e.to_string()), attempt + 1);
+                    self.report(
+                        inbox_url,
+                        activity,
+                        false,
+                        None,
+                        Some(e.to_string()),
+                        attempt + 1,
+                    );
                     log::warn!(
                         "Delivery attempt {}/{} to {inbox_url} failed: {e}",
                         attempt + 1,

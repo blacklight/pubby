@@ -47,8 +47,7 @@ pub struct NodeInfoStats {
 }
 
 /// Callback producing [`NodeInfoStats`] for the NodeInfo document.
-pub type NodeInfoStatsFn =
-    std::sync::Arc<dyn Fn() -> NodeInfoStats + Send + Sync>;
+pub type NodeInfoStatsFn = std::sync::Arc<dyn Fn() -> NodeInfoStats + Send + Sync>;
 
 /// Build the `/.well-known/host-meta` XRD document advertising the
 /// WebFinger `lrdd` template (XML serialization).

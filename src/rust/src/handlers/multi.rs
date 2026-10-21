@@ -21,8 +21,7 @@ use super::ActivityPubHandler;
 /// Resolves a local actor by username — `Ok(None)` for unknown users.
 /// The host decides caching/LRU; construct one [`ActivityPubHandler`]
 /// per local account.
-pub type ActorResolver =
-    Arc<dyn Fn(&str) -> Result<Option<Arc<ActivityPubHandler>>> + Send + Sync>;
+pub type ActorResolver = Arc<dyn Fn(&str) -> Result<Option<Arc<ActivityPubHandler>>> + Send + Sync>;
 
 /// Registry of local actors for multi-actor deployments.
 pub struct MultiActorHandler {
@@ -127,10 +126,7 @@ impl MultiActorHandler {
     }
 
     /// First candidate URL under the actor template → its handler.
-    fn local_actor_from_urls(
-        &self,
-        urls: &[String],
-    ) -> Result<Option<Arc<ActivityPubHandler>>> {
+    fn local_actor_from_urls(&self, urls: &[String]) -> Result<Option<Arc<ActivityPubHandler>>> {
         for url in urls {
             let base = self.instance.base_url.trim_end_matches('/');
             let Some(path) = url.strip_prefix(base) else {

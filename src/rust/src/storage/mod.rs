@@ -160,14 +160,10 @@ pub trait ActivityPubStorage: Send + Sync {
         let all = self.get_activities(limit.saturating_add(offset).max(limit), 0)?;
         Ok(all
             .into_iter()
-            .filter(|a| {
-                match a.get("actor") {
-                    Some(Value::String(s)) => s == actor_id,
-                    Some(Value::Object(m)) => {
-                        m.get("id").and_then(|v| v.as_str()) == Some(actor_id)
-                    }
-                    _ => false,
-                }
+            .filter(|a| match a.get("actor") {
+                Some(Value::String(s)) => s == actor_id,
+                Some(Value::Object(m)) => m.get("id").and_then(|v| v.as_str()) == Some(actor_id),
+                _ => false,
             })
             .skip(offset)
             .take(limit)

@@ -255,14 +255,8 @@ pub fn activitypub_router_multi(
             .route(&format!("{tpl}/followers"), get(serve_req_multi))
             .route(&format!("{tpl}/following"), get(serve_req_multi))
             .route(&format!("{tpl}/liked"), get(serve_req_multi))
-            .route(
-                &format!("{tpl}/collections/featured"),
-                get(serve_req_multi),
-            )
-            .route(
-                &format!("{tpl}/activities/{{*rest}}"),
-                get(serve_req_multi),
-            )
+            .route(&format!("{tpl}/collections/featured"), get(serve_req_multi))
+            .route(&format!("{tpl}/activities/{{*rest}}"), get(serve_req_multi))
             .route(
                 &format!("{tpl}/quote_authorizations/{{*rest}}"),
                 get(serve_req_multi),

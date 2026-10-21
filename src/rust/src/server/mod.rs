@@ -171,10 +171,7 @@ pub fn serve_document(
 
 /// Verify the HTTP signature of a dereference request under
 /// authorized-fetch mode.
-fn verify_fetch(
-    handler: &ActivityPubHandler,
-    request: &DispatchRequest,
-) -> Result<(), HttpResp> {
+fn verify_fetch(handler: &ActivityPubHandler, request: &DispatchRequest) -> Result<(), HttpResp> {
     let target = request
         .request_target
         .as_deref()
@@ -195,7 +192,9 @@ fn serve_host_meta(
     if path == "/.well-known/host-meta.json" {
         let key = cache::route_key(&["host-meta"]);
         return serve_document(handler, options, request, &key, JRD_JSON, || {
-            Some(crate::handlers::discovery::build_host_meta(&handler.base_url))
+            Some(crate::handlers::discovery::build_host_meta(
+                &handler.base_url,
+            ))
         });
     }
     HttpResp {
@@ -247,7 +246,10 @@ pub fn dispatch(
 
     // -- host-meta --
     if method == "GET"
-        && matches!(path, "/.well-known/host-meta" | "/.well-known/host-meta.json")
+        && matches!(
+            path,
+            "/.well-known/host-meta" | "/.well-known/host-meta.json"
+        )
     {
         return serve_host_meta(handler, options, request, path);
     }
@@ -416,7 +418,10 @@ pub fn dispatch_multi(
 
     // -- host-meta --
     if method == "GET"
-        && matches!(path, "/.well-known/host-meta" | "/.well-known/host-meta.json")
+        && matches!(
+            path,
+            "/.well-known/host-meta" | "/.well-known/host-meta.json"
+        )
     {
         return serve_host_meta(handler, options, request, path);
     }

@@ -43,13 +43,13 @@ pub use content::{
 };
 pub use error::{ActivityPubError, Result};
 pub use follows::{accept_follow_request, build_follow_response, reject_follow_request};
+pub use handlers::discovery::{build_host_meta, build_host_meta_xrd, NodeInfoStats};
+pub use handlers::inbox::ActivityDisposition;
 pub use handlers::outbox::{
     build_announce_activity, build_delete_activity, build_like_activity, build_quote_authorization,
     build_quote_request_activity, build_undo_activity, build_update_activity, collect_inboxes,
     deliver_activity, DeliveryOutcome,
 };
-pub use handlers::discovery::{build_host_meta, build_host_meta_xrd, NodeInfoStats};
-pub use handlers::inbox::ActivityDisposition;
 pub use handlers::{ActivityPubHandler, ActorResolver, MultiActorHandler};
 pub use model::{
     Activity, ActivityType, Actor, ActorConfig, DeliveryStatus, FollowPolicy, FollowRequest,

@@ -19,8 +19,7 @@ use crate::storage::ActivityPubStorage;
 
 use super::client::get_default_user_agent;
 use super::discovery::{
-    build_nodeinfo_discovery, build_nodeinfo_document, build_webfinger_response,
-    NodeInfoStatsFn,
+    build_nodeinfo_discovery, build_nodeinfo_document, build_webfinger_response, NodeInfoStatsFn,
 };
 use super::inbox::{
     FollowPolicyFn, InboxProcessor, OnActivityReceived, OnFollowResponse, OnInteractionReceived,

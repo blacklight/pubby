@@ -472,13 +472,10 @@ impl InboxProcessor {
         if target.is_empty() {
             return Ok(None);
         }
-        let _ = self
-            .storage
-            .remove_follow_request(&self.actor_id, &target);
+        let _ = self.storage.remove_follow_request(&self.actor_id, &target);
         if let Some(cb) = &self.on_follow_response {
-            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                cb(&target, accepted)
-            }));
+            let _ =
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| cb(&target, accepted)));
         }
         log::info!(
             "{} Follow of {target} (from {})",
