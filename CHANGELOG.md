@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## _Unreleased_
+
+### Fixed
+
+- Make the Rust Python-fixture compatibility test independent of cache age so
+  the checked-in actor fixture does not expire during CI.
+
 ## _0.4.2_
 
 ### Fixed
