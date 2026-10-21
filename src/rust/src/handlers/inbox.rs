@@ -28,6 +28,27 @@ use super::outbox::build_quote_authorization;
 /// Callback invoked when an interaction is received.
 pub type OnInteractionReceived = Arc<dyn Fn(&Interaction) + Send + Sync>;
 
+/// What the inbox dispatcher should do after an [`OnActivityReceived`]
+/// hook ran.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActivityDisposition {
+    /// The hook fully handled the activity; skip built-in processing.
+    Handled,
+    /// Continue into the built-in per-type handlers.
+    PassThrough,
+}
+
+/// Hook invoked for every verified inbound activity before the
+/// built-in dispatch — the host seam for activity types Pubby does
+/// not handle natively (`Move`, `Add`, `Remove`, `Block`, `Flag`, …).
+/// `Err` behaves like [`ActivityDisposition::PassThrough`].
+pub type OnActivityReceived =
+    Arc<dyn Fn(&Activity, &Value) -> Result<ActivityDisposition> + Send + Sync>;
+
+/// Callback invoked when an inbound `Accept`/`Reject` settles one of
+/// this actor's outbound `Follow`s — `(target_actor_id, accepted)`.
+pub type OnFollowResponse = Arc<dyn Fn(&str, bool) + Send + Sync>;
+
 /// Callback deciding how an incoming `Follow` is handled.
 /// Called with `(target_actor_id, requester_actor_id)` and returns an
 /// optional [`FollowPolicy`]; `None`/unknown resolve to `Accept`.
@@ -69,6 +90,12 @@ pub struct InboxProcessor {
     pub strict_attribution: bool,
     /// Callback deciding how an incoming `Follow` is handled.
     pub follow_policy: Option<FollowPolicyFn>,
+    /// Hook invoked for every verified inbound activity before the
+    /// built-in dispatch (see [`OnActivityReceived`]).
+    pub on_activity: Option<OnActivityReceived>,
+    /// Callback for `Accept`/`Reject` of this actor's outbound
+    /// `Follow`s — `(target_actor_id, accepted)`.
+    pub on_follow_response: Option<OnFollowResponse>,
 }
 
 impl InboxProcessor {
@@ -108,6 +135,8 @@ impl InboxProcessor {
             blocked_instances,
             strict_attribution,
             follow_policy,
+            on_activity: None,
+            on_follow_response: None,
         }
     }
 
@@ -356,10 +385,27 @@ impl InboxProcessor {
         }
 
         let activity = Activity::from_json(activity_data);
-        let activity_type = match ActivityType::from_raw(&activity.activity_type) {
+        let activity_type_str = activity.activity_type.trim().to_string();
+
+        // Host hook — runs after signature verification and the
+        // domain-block gate, before the built-in dispatch.
+        if let Some(cb) = &self.on_activity {
+            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                cb(&activity, activity_data)
+            })) {
+                Ok(Ok(ActivityDisposition::Handled)) => return Ok(None),
+                Ok(Err(e)) => {
+                    log::warn!("on_activity hook failed for {activity_type_str}: {e}")
+                }
+                Err(_) => log::warn!("on_activity hook panicked for {activity_type_str}"),
+                _ => {}
+            }
+        }
+
+        let activity_type = match ActivityType::from_raw(&activity_type_str) {
             Some(t) => t,
             None => {
-                log::info!("Ignoring unknown activity type: {}", activity.activity_type);
+                log::info!("Ignoring unknown activity type: {activity_type_str}");
                 return Ok(None);
             }
         };
@@ -373,11 +419,73 @@ impl InboxProcessor {
             ActivityType::Delete => self.handle_delete(&activity),
             ActivityType::Update => self.handle_update(&activity),
             ActivityType::QuoteRequest => self.handle_quote_request(&activity, activity_data),
-            _ => {
-                log::info!("No handler for activity type: {}", activity.activity_type);
-                Ok(None)
-            }
+            ActivityType::Accept => self.handle_follow_response(&activity, true),
+            ActivityType::Reject => self.handle_follow_response(&activity, false),
         }
+    }
+
+    /// Handle `Accept`/`Reject` of a `Follow` this actor sent.
+    ///
+    /// Only settles when the embedded Follow's `actor` is this actor —
+    /// i.e. the response targets one of *our* outbound follows. A pending
+    /// follow request left by the host (if it records outgoing follows
+    /// through `store_follow_request`) is removed, then
+    /// `on_follow_response(target, accepted)` fires.
+    fn handle_follow_response(&self, activity: &Activity, accepted: bool) -> Result<Option<Value>> {
+        let inner = match &activity.object {
+            Value::Object(m) => m,
+            _ => return Ok(None),
+        };
+        if inner
+            .get("type")
+            .and_then(|v| v.as_str())
+            .map(|t| !t.eq_ignore_ascii_case("follow"))
+            .unwrap_or(true)
+        {
+            return Ok(None);
+        }
+        let inner_actor = match inner.get("actor") {
+            Some(Value::String(s)) => s.clone(),
+            Some(Value::Object(m)) => m
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string(),
+            _ => String::new(),
+        };
+        if inner_actor != self.actor_id {
+            log::debug!(
+                "Ignoring {} of a Follow not issued by this actor",
+                activity.activity_type
+            );
+            return Ok(None);
+        }
+        let target = match inner.get("object") {
+            Some(Value::String(s)) => s.clone(),
+            Some(Value::Object(m)) => m
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string(),
+            _ => String::new(),
+        };
+        if target.is_empty() {
+            return Ok(None);
+        }
+        let _ = self
+            .storage
+            .remove_follow_request(&self.actor_id, &target);
+        if let Some(cb) = &self.on_follow_response {
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                cb(&target, accepted)
+            }));
+        }
+        log::info!(
+            "{} Follow of {target} (from {})",
+            if accepted { "Accepted" } else { "Rejected" },
+            activity.actor
+        );
+        Ok(None)
     }
 
     fn handle_follow(&self, activity: &Activity, raw: &Value) -> Result<Option<Value>> {

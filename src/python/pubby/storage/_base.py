@@ -266,6 +266,29 @@ class ActivityPubStorage(ABC):
         :return: A list of activity dictionaries, newest first.
         """
 
+    def get_activities_for_actor(
+        self,
+        actor_id: str,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[dict]:
+        """
+        Retrieve outbound activities of a single actor, newest first.
+
+        The default implementation filters :meth:`get_activities` on the
+        ``actor`` field — correct but linear; backends should override
+        with an indexed query.
+        """
+        all_acts = self.get_activities(limit=limit + offset, offset=0)
+
+        def _matches(act: dict) -> bool:
+            a = act.get("actor")
+            if isinstance(a, dict):
+                a = a.get("id")
+            return a == actor_id
+
+        return [a for a in all_acts if _matches(a)][offset : offset + limit]
+
     # ---------- Actor cache ----------
 
     @abstractmethod

@@ -10,6 +10,7 @@ from requests import ConnectionError, HTTPError
 
 from .crypto import load_private_key, sign_request
 from .handlers._client import get_default_user_agent
+from ._http import is_safe_outbound_url
 from .moderation import is_domain_blocked
 from .storage import ActivityPubStorage
 
@@ -62,6 +63,7 @@ def resolve_actor_inbox(
     blocked_instances: Collection[str] | None = None,
     user_agent: str | None = None,
     timeout: float = 10.0,
+    allow_private_targets: bool = False,
 ) -> str | None:
     """
     Resolve a remote actor's inbox, using the cache and an optional signed fetch.
@@ -92,6 +94,9 @@ def resolve_actor_inbox(
     parsed = urlparse(actor_url)
     if parsed.scheme not in ("http", "https"):
         logger.debug("Refusing to resolve non-HTTP(S) actor ID: %s", actor_url)
+        return None
+    if not is_safe_outbound_url(actor_url) and not allow_private_targets:
+        logger.debug("Refusing unsafe outbound URL: %s", actor_url)
         return None
 
     if is_domain_blocked(

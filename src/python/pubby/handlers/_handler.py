@@ -135,6 +135,11 @@ class ActivityPubHandler:
             Callable[[str, str], Optional[Union[FollowPolicy, str]]]
         ] = None,
         document_cache: Optional[_cache.DocumentCache] = None,
+        allow_private_targets: bool = False,
+        on_activity=None,
+        on_follow_response=None,
+        on_delivery_result=None,
+        nodeinfo_stats=None,
     ):
         self.storage = storage
         self.document_cache = document_cache  # property: propagates to processors
@@ -154,6 +159,10 @@ class ActivityPubHandler:
         self.manually_approves = actor_config.manually_approves_followers
         self.actor_attachment = actor_config.attachment
         self.actor_url = actor_config.url or actor_config.base_url
+        self.actor_liked = actor_config.liked
+        self.actor_featured = actor_config.featured
+        self.actor_moved_to = actor_config.moved_to
+        self.actor_also_known_as = actor_config.also_known_as
 
         # Derived URLs
         self.actor_id = f"{self.base_url}{self.actor_path}"
@@ -206,6 +215,9 @@ class ActivityPubHandler:
             allowed_instances=allowed_instances,
             blocked_instances=blocked_instances,
             strict_attribution=strict_attribution,
+            allow_private_targets=allow_private_targets,
+            on_activity=on_activity,
+            on_follow_response=on_follow_response,
             follow_policy=(
                 follow_policy
                 if follow_policy is not None
@@ -230,8 +242,10 @@ class ActivityPubHandler:
             allowed_instances=allowed_instances,
             blocked_instances=blocked_instances,
             deliver=deliver,
+            on_delivery_result=on_delivery_result,
             document_cache=document_cache,
         )
+        self.nodeinfo_stats = nodeinfo_stats
 
         self.renderer = InteractionsRenderer()
 
@@ -363,6 +377,10 @@ class ActivityPubHandler:
             url=self.actor_url,
             endpoints={"sharedInbox": self.shared_inbox_url},
             attachment=self.actor_attachment,
+            liked=self.actor_liked,
+            featured=self.actor_featured,
+            moved_to=self.actor_moved_to,
+            also_known_as=self.actor_also_known_as,
         )
 
         return actor.to_dict()
@@ -493,11 +511,34 @@ class ActivityPubHandler:
 
         :return: The NodeInfo document.
         """
+        if self.nodeinfo_stats is not None:
+            stats = self.nodeinfo_stats()
+            return build_nodeinfo_document(
+                software_name=self.software_name,
+                software_version=self.software_version,
+                total_users=stats.users,
+                total_posts=stats.posts,
+                open_registrations=stats.open_registrations,
+            )
         activities = self.storage.get_activities(limit=10000, offset=0)
         return build_nodeinfo_document(
             software_name=self.software_name,
             software_version=self.software_version,
             total_posts=len(activities),
+        )
+
+    def verify_fetch_signature(
+        self,
+        method: str,
+        request_target: str,
+        headers: Dict[str, str],
+    ) -> str:
+        """Verify the HTTP signature of an inbound dereference request.
+
+        Returns the signer's actor URL; raises SignatureVerificationError.
+        """
+        return self.inbox.verify_signature(
+            method, request_target, headers, None, expected_actor=None
         )
 
     # ---------- Quote authorizations ----------

@@ -71,6 +71,10 @@ pub struct DispatchOptions {
     /// Custom key extractor for the rate-limit bucket (e.g. a
     /// trusted-proxy-aware resolver).
     pub rate_limit_key: Option<RateLimitKeyFn>,
+    /// Require a valid HTTP signature on AP dereference GET routes
+    /// ("authorized fetch"). Well-known and NodeInfo endpoints stay
+    /// unsigned — discovery must remain open.
+    pub authorized_fetch: bool,
 }
 
 /// A framework-agnostic incoming request passed to [`dispatch`].
@@ -165,6 +169,47 @@ pub fn serve_document(
     }
 }
 
+/// Verify the HTTP signature of a dereference request under
+/// authorized-fetch mode.
+fn verify_fetch(
+    handler: &ActivityPubHandler,
+    request: &DispatchRequest,
+) -> Result<(), HttpResp> {
+    let target = request
+        .request_target
+        .as_deref()
+        .unwrap_or(request.path.as_str());
+    handler
+        .verify_fetch_signature(&request.method, target, &request.headers)
+        .map(|_| ())
+        .map_err(|e| HttpResp::json(401, &json!({"error": e.to_string()})))
+}
+
+/// Serve `/.well-known/host-meta` (XRD) and its `.json` JRD variant.
+fn serve_host_meta(
+    handler: &ActivityPubHandler,
+    options: &DispatchOptions,
+    request: &DispatchRequest,
+    path: &str,
+) -> HttpResp {
+    if path == "/.well-known/host-meta.json" {
+        let key = cache::route_key(&["host-meta"]);
+        return serve_document(handler, options, request, &key, JRD_JSON, || {
+            Some(crate::handlers::discovery::build_host_meta(&handler.base_url))
+        });
+    }
+    HttpResp {
+        status: 200,
+        headers: [(
+            "Content-Type".to_string(),
+            "application/xrd+xml".to_string(),
+        )]
+        .into_iter()
+        .collect(),
+        body: crate::handlers::discovery::build_host_meta_xrd(&handler.base_url).into_bytes(),
+    }
+}
+
 /// Route a request to the matching pubby endpoint.
 ///
 /// `prefix` is the ActivityPub route prefix (default `/ap` when empty).
@@ -200,6 +245,13 @@ pub fn dispatch(
         });
     }
 
+    // -- host-meta --
+    if method == "GET"
+        && matches!(path, "/.well-known/host-meta" | "/.well-known/host-meta.json")
+    {
+        return serve_host_meta(handler, options, request, path);
+    }
+
     // -- NodeInfo discovery --
     if method == "GET" && path == "/.well-known/nodeinfo" {
         let key = cache::nodeinfo_discovery_key();
@@ -221,8 +273,20 @@ pub fn dispatch(
         });
     }
 
+    // -- Authorized-fetch gate for AP GET routes below --
+    macro_rules! gate {
+        () => {
+            if options.authorized_fetch {
+                if let Err(resp) = verify_fetch(handler, request) {
+                    return resp;
+                }
+            }
+        };
+    }
+
     // -- Actor --
     if method == "GET" && path == format!("{prefix}/actor") {
+        gate!();
         let key = cache::actor_document_key();
         return serve_document(handler, options, request, &key, ACTIVITY_JSON, || {
             Some(handler.get_actor_document())
@@ -270,6 +334,7 @@ pub fn dispatch(
 
     // -- Outbox --
     if method == "GET" && path == format!("{prefix}/outbox") {
+        gate!();
         let limit = request
             .query
             .get("limit")
@@ -290,6 +355,7 @@ pub fn dispatch(
 
     // -- Followers --
     if method == "GET" && path == format!("{prefix}/followers") {
+        gate!();
         let key = cache::followers_key();
         return serve_document(handler, options, request, &key, ACTIVITY_JSON, || {
             handler.get_followers_collection(None).ok()
@@ -298,6 +364,7 @@ pub fn dispatch(
 
     // -- Following --
     if method == "GET" && path == format!("{prefix}/following") {
+        gate!();
         let key = cache::following_key();
         return serve_document(handler, options, request, &key, ACTIVITY_JSON, || {
             handler.get_following_collection().ok()
@@ -307,6 +374,7 @@ pub fn dispatch(
     // -- Quote authorizations --
     let qa_prefix = format!("{}/quote_authorizations/", handler.actor_path);
     if method == "GET" && path.starts_with(&qa_prefix) {
+        gate!();
         let auth_id = &path[qa_prefix.len()..];
         if auth_id.is_empty() || auth_id.contains('/') || auth_id.contains("..") {
             return HttpResp::json(404, &json!({"error": "not found"}));
@@ -316,6 +384,277 @@ pub fn dispatch(
         return serve_document(handler, options, request, &key, ACTIVITY_JSON, || {
             handler.get_quote_authorization(&full_id).ok().flatten()
         });
+    }
+
+    HttpResp::json(404, &json!({"error": "not found"}))
+}
+
+/// Route a request against a [`MultiActorHandler`](crate::handlers::MultiActorHandler).
+///
+/// Adds the per-actor route space derived from
+/// `actor_path_template` (e.g. `/ap/users/{username}`):
+/// `{tpl}` (actor document), `{tpl}/inbox` (POST), `{tpl}/outbox`,
+/// `{tpl}/followers`, `{tpl}/following`, `{tpl}/liked`,
+/// `{tpl}/collections/featured`, `{tpl}/activities/{id}` and
+/// `{tpl}/quote_authorizations/{id}`; `POST {prefix}/inbox` is the
+/// shared inbox resolving the addressed actor; well-known and
+/// host-meta endpoints behave as in [`dispatch`].
+pub fn dispatch_multi(
+    multi: &crate::handlers::MultiActorHandler,
+    request: &DispatchRequest,
+    prefix: &str,
+    options: &DispatchOptions,
+) -> HttpResp {
+    let prefix = if prefix.is_empty() {
+        "/ap"
+    } else {
+        prefix.trim_end_matches('/')
+    };
+    let method = request.method.to_uppercase();
+    let path = request.path.as_str();
+    let handler = &*multi.instance;
+
+    // -- host-meta --
+    if method == "GET"
+        && matches!(path, "/.well-known/host-meta" | "/.well-known/host-meta.json")
+    {
+        return serve_host_meta(handler, options, request, path);
+    }
+
+    // -- WebFinger --
+    if method == "GET" && path == "/.well-known/webfinger" {
+        let Some(resource) = request
+            .query
+            .get("resource")
+            .cloned()
+            .filter(|r| !r.is_empty())
+        else {
+            return HttpResp::json(400, &json!({"error": "resource parameter is required"}));
+        };
+        let key = cache::webfinger_key(&resource);
+        return serve_document(handler, options, request, &key, JRD_JSON, || {
+            multi.get_webfinger_response(Some(&resource))
+        });
+    }
+
+    // -- NodeInfo discovery + document --
+    if method == "GET" && path == "/.well-known/nodeinfo" {
+        let key = cache::nodeinfo_discovery_key();
+        return serve_document(handler, options, request, &key, "application/json", || {
+            Some(handler.get_nodeinfo_discovery())
+        });
+    }
+    if method == "GET"
+        && matches!(
+            path,
+            "/nodeinfo/2.1" | "/nodeinfo/2.0" | "/nodeinfo/2.0.json" | "/nodeinfo/2.1.json"
+        )
+    {
+        let key = cache::nodeinfo_key();
+        return serve_document(handler, options, request, &key, "application/json", || {
+            handler.get_nodeinfo_document().ok()
+        });
+    }
+
+    macro_rules! gate {
+        ($h:expr) => {
+            if options.authorized_fetch {
+                if let Err(resp) = verify_fetch($h, request) {
+                    return resp;
+                }
+            }
+        };
+    }
+
+    // -- Instance actor + shared inbox --
+    if method == "GET" && path == format!("{prefix}/actor") {
+        gate!(handler);
+        let key = cache::actor_document_key();
+        return serve_document(handler, options, request, &key, ACTIVITY_JSON, || {
+            Some(handler.get_actor_document())
+        });
+    }
+    if method == "GET" && path == format!("{prefix}/outbox") {
+        gate!(handler);
+        let limit = request
+            .query
+            .get("limit")
+            .and_then(|v| v.parse::<i64>().ok())
+            .unwrap_or(20);
+        let offset = request
+            .query
+            .get("offset")
+            .and_then(|v| v.parse::<i64>().ok())
+            .unwrap_or(0);
+        let key = cache::outbox_key(limit.max(0), offset.max(0));
+        return serve_document(handler, options, request, &key, ACTIVITY_JSON, || {
+            handler
+                .get_outbox(Some(limit.max(0) as usize), Some(offset.max(0) as usize))
+                .ok()
+        });
+    }
+    if method == "GET" && path == format!("{prefix}/followers") {
+        gate!(handler);
+        let key = cache::followers_key();
+        return serve_document(handler, options, request, &key, ACTIVITY_JSON, || {
+            handler.get_followers_collection(None).ok()
+        });
+    }
+    if method == "GET" && path == format!("{prefix}/following") {
+        gate!(handler);
+        let key = cache::following_key();
+        return serve_document(handler, options, request, &key, ACTIVITY_JSON, || {
+            handler.get_following_collection().ok()
+        });
+    }
+
+    // -- Shared + per-user inboxes --
+    let is_shared_inbox = method == "POST" && path == format!("{prefix}/inbox");
+    let per_user = multi
+        .username_from_path(path)
+        .map(|(u, sub)| (u.to_string(), sub.to_string()));
+    let is_user_inbox = method == "POST" && matches!(&per_user, Some((_, s)) if s == "/inbox");
+    if is_shared_inbox || is_user_inbox {
+        if let Some(rl) = &options.rate_limiter {
+            let bucket = options
+                .rate_limit_key
+                .as_ref()
+                .map(|f| f(request))
+                .unwrap_or_else(|| {
+                    if request.remote_addr.is_empty() {
+                        "unknown".to_string()
+                    } else {
+                        request.remote_addr.clone()
+                    }
+                });
+            if rl.check(&bucket).is_err() {
+                return HttpResp::json(429, &json!({"error": "rate limit exceeded"}));
+            }
+        }
+        let activity_data: Value = match serde_json::from_slice(&request.body) {
+            Ok(v) => v,
+            Err(_) => return HttpResp::json(400, &json!({"error": "invalid JSON"})),
+        };
+        // Resolve the addressed actor: the path's username for per-user
+        // inboxes, else the addressees; unknown users → 404.
+        let resolved = match &per_user {
+            Some((u, s)) if s == "/inbox" => match multi.for_username(u) {
+                Ok(Some(h)) => Ok(h),
+                Ok(None) => return HttpResp::json(404, &json!({"error": "not found"})),
+                Err(e) => return HttpResp::json(400, &json!({"error": e.to_string()})),
+            },
+            _ => multi
+                .for_addressees(&activity_data)
+                .map_err(|e| HttpResp::json(400, &json!({"error": e.to_string()}))),
+        };
+        let h = match resolved {
+            Ok(h) => h,
+            Err(resp) => return resp,
+        };
+        let target = request.request_target.as_deref().unwrap_or(path);
+        return match h.process_inbox_activity(
+            &activity_data,
+            "POST",
+            target,
+            Some(&request.headers),
+            Some(&request.body),
+            false,
+        ) {
+            Ok(_) => HttpResp::json(202, &json!({"status": "ok"})),
+            Err(e) if e.is_signature_verification() => {
+                HttpResp::json(401, &json!({"error": e.to_string()}))
+            }
+            Err(e) => HttpResp::json(400, &json!({"error": e.to_string()})),
+        };
+    }
+
+    // -- Per-actor GET routes --
+    if let Some((username, sub)) = per_user.clone() {
+        let h = match multi.for_username(&username) {
+            Ok(Some(h)) => h,
+            _ => return HttpResp::json(404, &json!({"error": "not found"})),
+        };
+        let _actor_path = multi.actor_path(&username);
+        match (method.as_str(), sub.as_str()) {
+            ("GET", "") => {
+                gate!(&h);
+                let key = cache::actor_document_key_for(&username);
+                return serve_document(&h, options, request, &key, ACTIVITY_JSON, || {
+                    Some(h.get_actor_document())
+                });
+            }
+            ("GET", "/outbox") => {
+                gate!(&h);
+                let limit = request
+                    .query
+                    .get("limit")
+                    .and_then(|v| v.parse::<i64>().ok())
+                    .unwrap_or(20);
+                let offset = request
+                    .query
+                    .get("offset")
+                    .and_then(|v| v.parse::<i64>().ok())
+                    .unwrap_or(0);
+                let key = cache::outbox_key_for(&username, limit.max(0), offset.max(0));
+                return serve_document(&h, options, request, &key, ACTIVITY_JSON, || {
+                    h.get_outbox(Some(limit.max(0) as usize), Some(offset.max(0) as usize))
+                        .ok()
+                });
+            }
+            ("GET", "/followers") => {
+                gate!(&h);
+                let key = cache::followers_key_for(&username);
+                return serve_document(&h, options, request, &key, ACTIVITY_JSON, || {
+                    h.get_followers_collection(None).ok()
+                });
+            }
+            ("GET", "/following") => {
+                gate!(&h);
+                let key = cache::following_key_for(&username);
+                return serve_document(&h, options, request, &key, ACTIVITY_JSON, || {
+                    h.get_following_collection().ok()
+                });
+            }
+            ("GET", s @ ("/liked" | "/collections/featured")) => {
+                gate!(&h);
+                let coll_url = format!("{}{s}", h.actor_id);
+                let key = cache::route_key(&["collection", &username, s]);
+                return serve_document(&h, options, request, &key, ACTIVITY_JSON, || {
+                    Some(crate::collections::ordered_collection(&coll_url, &[], None))
+                });
+            }
+            ("GET", s) if s.starts_with("/quote_authorizations/") => {
+                gate!(&h);
+                let auth_id = &s["/quote_authorizations/".len()..];
+                if auth_id.is_empty() || auth_id.contains('/') || auth_id.contains("..") {
+                    return HttpResp::json(404, &json!({"error": "not found"}));
+                }
+                let full_id = format!("{}/quote_authorizations/{auth_id}", h.actor_id);
+                let key = cache::quote_authorization_key(&full_id);
+                return serve_document(&h, options, request, &key, ACTIVITY_JSON, || {
+                    h.get_quote_authorization(&full_id).ok().flatten()
+                });
+            }
+            ("GET", s) if s.starts_with("/activities/") => {
+                gate!(&h);
+                let act_id = &s["/activities/".len()..];
+                if act_id.is_empty() || act_id.contains('/') || act_id.contains("..") {
+                    return HttpResp::json(404, &json!({"error": "not found"}));
+                }
+                let full_id = format!("{}/activities/{act_id}", h.actor_id);
+                let key = cache::document_key_for(&username, "activities", act_id);
+                return serve_document(&h, options, request, &key, ACTIVITY_JSON, || {
+                    h.storage
+                        .get_activities_for_actor(&h.actor_id, 10000, 0)
+                        .ok()
+                        .and_then(|acts| {
+                            acts.into_iter()
+                                .find(|a| a.get("id").and_then(|v| v.as_str()) == Some(&full_id))
+                        })
+                });
+            }
+            _ => return HttpResp::json(404, &json!({"error": "not found"})),
+        }
     }
 
     HttpResp::json(404, &json!({"error": "not found"}))

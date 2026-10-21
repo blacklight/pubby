@@ -99,3 +99,29 @@ def build_nodeinfo_document(
         },
         "metadata": {},
     }
+
+
+def build_host_meta(base_url: str) -> dict:
+    """JRD form of the host-meta document (``/.well-known/host-meta.json``)."""
+    base = base_url.rstrip("/")
+    return {
+        "links": [
+            {
+                "rel": "lrdd",
+                "type": "application/jrd+json",
+                "template": f"{base}/.well-known/webfinger?resource={{uri}}",
+            }
+        ]
+    }
+
+
+def build_host_meta_xrd(base_url: str) -> str:
+    """XRD XML document advertising the WebFinger ``lrdd`` template."""
+    base = base_url.rstrip("/")
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<XRD xmlns="http://docs.oasis-open.org/ns/xri/xrd-1.0">\n'
+        '  <Link rel="lrdd" type="application/jrd+json" '
+        f'template="{base}/.well-known/webfinger?resource={{uri}}"/>\n'
+        "</XRD>\n"
+    )

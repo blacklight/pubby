@@ -20,9 +20,12 @@ use crate::storage::ActivityPubStorage;
 use super::client::get_default_user_agent;
 use super::discovery::{
     build_nodeinfo_discovery, build_nodeinfo_document, build_webfinger_response,
+    NodeInfoStatsFn,
 };
-use super::inbox::{FollowPolicyFn, InboxProcessor, OnInteractionReceived};
-use super::outbox::{DeliverFn, OutboxProcessor};
+use super::inbox::{
+    FollowPolicyFn, InboxProcessor, OnActivityReceived, OnFollowResponse, OnInteractionReceived,
+};
+use super::outbox::{DeliverFn, OnDeliveryResult, OutboxProcessor};
 
 /// Options accepted by [`ActivityPubHandler::new`] — mirrors the
 /// Python kwargs, including their defaults.
@@ -72,6 +75,22 @@ pub struct HandlerOptions {
     /// Document cache used by framework adapters for dereference
     /// endpoints.
     pub document_cache: Option<Arc<DocumentCache>>,
+    /// Allow outbound fetches/deliveries to loopback or private targets.
+    /// For development and tests only. Defaults to `false`.
+    pub allow_private_targets: bool,
+    /// Hook invoked for every verified inbound activity before the
+    /// built-in dispatch. Returning [`ActivityDisposition::Handled`]
+    /// short-circuits Pubby's own processing.
+    pub on_activity: Option<OnActivityReceived>,
+    /// Callback invoked when an `Accept`/`Reject` settles one of this
+    /// actor's outbound `Follow`s — `(target_actor_id, accepted)`.
+    pub on_follow_response: Option<OnFollowResponse>,
+    /// Callback invoked after every delivery attempt — observe-only seam
+    /// for delivery ledgers.
+    pub on_delivery_result: Option<OnDeliveryResult>,
+    /// Callback producing real NodeInfo usage stats. When unset,
+    /// `users = 1` and the stored activity count are reported.
+    pub nodeinfo_stats: Option<NodeInfoStatsFn>,
 }
 
 impl Default for HandlerOptions {
@@ -100,6 +119,11 @@ impl Default for HandlerOptions {
             strict_attribution: false,
             follow_policy: None,
             document_cache: None,
+            allow_private_targets: false,
+            on_activity: None,
+            on_follow_response: None,
+            on_delivery_result: None,
+            nodeinfo_stats: None,
         }
     }
 }
@@ -133,6 +157,14 @@ pub struct ActivityPubHandler {
     pub actor_attachment: Vec<Value>,
     /// Human-readable profile URL.
     pub actor_url: String,
+    /// `liked` collection URL from the actor config.
+    pub actor_liked: Option<String>,
+    /// `featured` collection URL from the actor config.
+    pub actor_featured: Option<String>,
+    /// `movedTo` actor URL from the actor config.
+    pub actor_moved_to: Option<String>,
+    /// `alsoKnownAs` actor URLs from the actor config.
+    pub actor_also_known_as: Vec<String>,
     /// The full actor document ID.
     pub actor_id: String,
     /// Inbox URL.
@@ -161,6 +193,8 @@ pub struct ActivityPubHandler {
     pub outbox: OutboxProcessor,
     /// The interactions renderer.
     pub renderer: InteractionsRenderer,
+    /// NodeInfo stats callback.
+    pub nodeinfo_stats: Option<NodeInfoStatsFn>,
 }
 
 impl ActivityPubHandler {
@@ -187,6 +221,10 @@ impl ActivityPubHandler {
         let manually_approves = actor_config.manually_approves_followers;
         let actor_attachment = actor_config.attachment.clone();
         let actor_url = actor_config.url.clone().unwrap_or_else(|| base_url.clone());
+        let actor_liked = actor_config.liked.clone();
+        let actor_featured = actor_config.featured.clone();
+        let actor_moved_to = actor_config.moved_to.clone();
+        let actor_also_known_as = actor_config.also_known_as.clone();
 
         let actor_id = format!("{base_url}{actor_path}");
         let inbox_url = format!("{base_url}/ap/inbox");
@@ -213,9 +251,10 @@ impl ActivityPubHandler {
             .clone()
             .unwrap_or_else(|| crate::VERSION.to_string());
 
-        let http_client = crate::http::HttpClient::new(std::time::Duration::from_secs_f64(
+        let mut http_client = crate::http::HttpClient::new(std::time::Duration::from_secs_f64(
             options.http_timeout.max(1.0),
         ));
+        http_client.allow_private_targets(options.allow_private_targets);
 
         let follow_policy = options.follow_policy.clone().or_else(|| {
             if manually_approves {
@@ -225,7 +264,7 @@ impl ActivityPubHandler {
             }
         });
 
-        let inbox = InboxProcessor::new(
+        let mut inbox = InboxProcessor::new(
             storage.clone(),
             actor_id.clone(),
             private_key.clone(),
@@ -242,6 +281,8 @@ impl ActivityPubHandler {
             follow_policy,
             options.document_cache.clone(),
         );
+        inbox.on_activity = options.on_activity.clone();
+        inbox.on_follow_response = options.on_follow_response.clone();
 
         let outbox = OutboxProcessor {
             storage: storage.clone(),
@@ -262,7 +303,9 @@ impl ActivityPubHandler {
             allowed_instances: options.allowed_instances.clone(),
             blocked_instances: options.blocked_instances.clone(),
             deliver: options.deliver.clone(),
+            on_delivery_result: options.on_delivery_result.clone(),
         };
+        let nodeinfo_stats = options.nodeinfo_stats.clone();
 
         Ok(ActivityPubHandler {
             storage,
@@ -277,6 +320,10 @@ impl ActivityPubHandler {
             manually_approves,
             actor_attachment,
             actor_url,
+            actor_liked,
+            actor_featured,
+            actor_moved_to,
+            actor_also_known_as,
             actor_id,
             inbox_url,
             outbox_url,
@@ -295,6 +342,7 @@ impl ActivityPubHandler {
             inbox,
             outbox,
             renderer: InteractionsRenderer::new(),
+            nodeinfo_stats,
         })
     }
 
@@ -401,6 +449,10 @@ impl ActivityPubHandler {
                 .into_iter()
                 .collect(),
             attachment: self.actor_attachment.clone(),
+            liked: self.actor_liked.clone(),
+            featured: self.actor_featured.clone(),
+            moved_to: self.actor_moved_to.clone(),
+            also_known_as: self.actor_also_known_as.clone(),
         };
         actor.to_json()
     }
@@ -486,15 +538,42 @@ impl ActivityPubHandler {
     }
 
     /// Build the NodeInfo 2.1 document.
+    ///
+    /// When `HandlerOptions::nodeinfo_stats` is set the callback supplies
+    /// real usage numbers; otherwise `users = 1` and the stored activity
+    /// count are reported (legacy single-actor behavior).
     pub fn get_nodeinfo_document(&self) -> Result<Value> {
-        let activities = self.storage.get_activities(10000, 0)?;
+        let (users, posts, open_reg) = match &self.nodeinfo_stats {
+            Some(f) => {
+                let s = f();
+                (s.users, s.posts, s.open_registrations)
+            }
+            None => {
+                let activities = self.storage.get_activities(10000, 0)?;
+                (1, activities.len() as u64, false)
+            }
+        };
         Ok(build_nodeinfo_document(
             &self.software_name,
             Some(&self.software_version),
-            1,
-            activities.len() as u64,
-            false,
+            users,
+            posts,
+            open_reg,
         ))
+    }
+
+    /// Verify the HTTP signature on an inbound dereference request.
+    ///
+    /// Used by the authorized-fetch gate in `server::dispatch` (and by
+    /// hosts' own middleware); returns the signer's actor URL.
+    pub fn verify_fetch_signature(
+        &self,
+        method: &str,
+        request_target: &str,
+        headers: &std::collections::HashMap<String, String>,
+    ) -> Result<String> {
+        self.inbox
+            .verify_signature(method, request_target, headers, None, None)
     }
 
     // ---------- Quote authorizations ----------

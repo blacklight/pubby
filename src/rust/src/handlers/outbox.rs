@@ -3,6 +3,7 @@
 
 use std::collections::HashSet;
 use std::sync::Arc;
+
 use std::time::Duration;
 
 use chrono::Utc;
@@ -19,6 +20,28 @@ use crate::storage::ActivityPubStorage;
 
 /// URL patterns that are not actor URLs (collections, public addressing).
 const NON_ACTOR_URL_PATTERNS: &[&str] = &["/followers", "/following", "/outbox", "/inbox"];
+
+/// Outcome of a single delivery attempt to a remote inbox.
+#[derive(Debug, Clone)]
+pub struct DeliveryOutcome {
+    /// The remote inbox URL.
+    pub inbox_url: String,
+    /// The activity's `id`.
+    pub activity_id: String,
+    /// Whether the delivery was accepted (2xx).
+    pub ok: bool,
+    /// HTTP status when a response arrived.
+    pub status: Option<u16>,
+    /// Network/serialization error description.
+    pub error: Option<String>,
+    /// 1-based attempt that produced this outcome.
+    pub attempt: usize,
+}
+
+/// Observe-only callback invoked after every delivery attempt — lets
+/// hosts maintain delivery ledgers without replacing the built-in
+/// fan-out via [`DeliverFn`].
+pub type OnDeliveryResult = Arc<dyn Fn(&DeliveryOutcome) + Send + Sync>;
 
 /// Collect unique inbox URLs from followers, preferring shared inboxes.
 ///
@@ -377,6 +400,8 @@ pub struct OutboxProcessor {
     pub blocked_instances: Option<Vec<String>>,
     /// Optional custom delivery callable.
     pub deliver: Option<DeliverFn>,
+    /// Called after every delivery attempt (see [`OnDeliveryResult`]).
+    pub on_delivery_result: Option<OnDeliveryResult>,
 }
 
 impl OutboxProcessor {
@@ -618,6 +643,7 @@ impl OutboxProcessor {
             max_delivery_workers: self.max_delivery_workers,
             user_agent: self.user_agent.clone(),
             http_client: self.http_client.clone(),
+            on_delivery_result: self.on_delivery_result.clone(),
         }
     }
 
@@ -766,6 +792,7 @@ pub struct DeliveryContext {
     max_delivery_workers: usize,
     user_agent: String,
     http_client: HttpClient,
+    on_delivery_result: Option<OnDeliveryResult>,
 }
 
 impl DeliveryContext {
@@ -793,6 +820,7 @@ impl DeliveryContext {
                 max_delivery_workers: self.max_delivery_workers,
                 user_agent: self.user_agent.clone(),
                 http_client: self.http_client.clone(),
+                on_delivery_result: self.on_delivery_result.clone(),
             };
             let activity = activity.clone();
             handles.push(std::thread::spawn(move || loop {
@@ -809,14 +837,44 @@ impl DeliveryContext {
         }
     }
 
+    fn report(&self, inbox_url: &str, activity: &Value, ok: bool, status: Option<u16>, error: Option<String>, attempt: usize) {
+        if let Some(cb) = &self.on_delivery_result {
+            let outcome = DeliveryOutcome {
+                inbox_url: inbox_url.to_string(),
+                activity_id: activity
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                ok,
+                status,
+                error,
+                attempt,
+            };
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| cb(&outcome)));
+        }
+    }
+
     /// Deliver an activity to a remote inbox with exponential backoff.
     pub fn deliver_with_retry(&self, inbox_url: &str, activity: &Value) -> bool {
         for attempt in 0..self.max_retries.max(1) {
-            match self.deliver(inbox_url, activity) {
-                Ok(true) => return true,
-                Ok(false) | Err(_) => {
+            match self.deliver_status(inbox_url, activity) {
+                Ok(status) if (200..300).contains(&status) => {
+                    self.report(inbox_url, activity, true, Some(status), None, attempt + 1);
+                    return true;
+                }
+                Ok(status) => {
+                    self.report(inbox_url, activity, false, Some(status), None, attempt + 1);
                     log::warn!(
-                        "Delivery attempt {}/{} to {inbox_url} failed",
+                        "Delivery attempt {}/{} to {inbox_url} failed (status {status})",
+                        attempt + 1,
+                        self.max_retries,
+                    );
+                }
+                Err(e) => {
+                    self.report(inbox_url, activity, false, None, Some(e.to_string()), attempt + 1);
+                    log::warn!(
+                        "Delivery attempt {}/{} to {inbox_url} failed: {e}",
                         attempt + 1,
                         self.max_retries,
                     );
@@ -836,15 +894,19 @@ impl DeliveryContext {
 
     /// Deliver an activity to a single inbox.
     pub fn deliver(&self, inbox_url: &str, activity: &Value) -> Result<bool> {
-        let status = deliver_activity(
+        Ok((200..300).contains(&self.deliver_status(inbox_url, activity)?))
+    }
+
+    /// Deliver an activity, returning the HTTP status code.
+    pub fn deliver_status(&self, inbox_url: &str, activity: &Value) -> Result<u16> {
+        deliver_activity(
             activity,
             inbox_url,
             &self.key_id,
             &self.private_key,
             Some(&self.user_agent),
             &self.http_client,
-        )?;
-        Ok((200..300).contains(&status))
+        )
     }
 }
 

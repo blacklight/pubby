@@ -106,6 +106,26 @@ class FollowPolicy(str, Enum):
     REJECT = "reject"
 
 
+class ActivityDisposition(str, Enum):
+    """What the inbox dispatcher does after an ``on_activity`` hook ran."""
+
+    HANDLED = "handled"
+    PASS_THROUGH = "pass_through"
+
+
+class NodeInfoStats:
+    """Usage statistics for the NodeInfo document."""
+
+    def __init__(
+        self, users: int = 1, posts: int = 0, open_registrations: bool = False
+    ):
+        self.users = users
+        self.posts = posts
+        self.open_registrations = open_registrations
+
+    REJECT = "reject"
+
+
 # ---------- Helper ----------
 
 
@@ -205,6 +225,10 @@ class ActorConfig:
     manually_approves_followers: bool = False
     attachment: list[dict] = field(default_factory=list)
     url: str | None = None
+    liked: str | None = None
+    featured: str | None = None
+    moved_to: str | None = None
+    also_known_as: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.base_url = self.base_url.rstrip("/")
@@ -225,6 +249,10 @@ class ActorConfig:
             manually_approves_followers=d.get("manually_approves_followers", False),
             attachment=d.get("attachment", []),
             url=d.get("url"),
+            liked=d.get("liked"),
+            featured=d.get("featured"),
+            moved_to=d.get("moved_to"),
+            also_known_as=d.get("also_known_as") or [],
         )
 
 
@@ -250,6 +278,10 @@ class Actor:
     url: str = ""
     endpoints: dict = field(default_factory=dict)
     attachment: list[dict] = field(default_factory=list)
+    liked: str | None = None
+    featured: str | None = None
+    moved_to: str | None = None
+    also_known_as: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         """Return the ActivityPub JSON-LD representation."""
@@ -284,6 +316,14 @@ class Actor:
 
         if self.attachment:
             doc["attachment"] = self.attachment
+        if self.liked:
+            doc["liked"] = self.liked
+        if self.featured:
+            doc["featured"] = self.featured
+        if self.moved_to:
+            doc["movedTo"] = self.moved_to
+        if self.also_known_as:
+            doc["alsoKnownAs"] = self.also_known_as
 
         return doc
 
@@ -316,6 +356,10 @@ class Actor:
             url=data.get("url", ""),
             endpoints=data.get("endpoints", {}),
             attachment=data.get("attachment", []),
+            liked=data.get("liked"),
+            featured=data.get("featured"),
+            moved_to=data.get("movedTo"),
+            also_known_as=data.get("alsoKnownAs") or [],
         )
 
 

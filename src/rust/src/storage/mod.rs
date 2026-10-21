@@ -146,6 +146,34 @@ pub trait ActivityPubStorage: Send + Sync {
     /// first.
     fn get_activities(&self, limit: usize, offset: usize) -> Result<Vec<Value>>;
 
+    /// Retrieve outbound activities of a single actor, newest first.
+    ///
+    /// The default implementation fetches `limit + offset` entries and
+    /// filters on the activity's `actor` field — correct but linear;
+    /// backends should override with an indexed query.
+    fn get_activities_for_actor(
+        &self,
+        actor_id: &str,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<Value>> {
+        let all = self.get_activities(limit.saturating_add(offset).max(limit), 0)?;
+        Ok(all
+            .into_iter()
+            .filter(|a| {
+                match a.get("actor") {
+                    Some(Value::String(s)) => s == actor_id,
+                    Some(Value::Object(m)) => {
+                        m.get("id").and_then(|v| v.as_str()) == Some(actor_id)
+                    }
+                    _ => false,
+                }
+            })
+            .skip(offset)
+            .take(limit)
+            .collect())
+    }
+
     // ---------- Actor cache ----------
 
     /// Cache a fetched remote actor's data.

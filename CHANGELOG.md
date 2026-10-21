@@ -2,6 +2,51 @@
 
 All notable changes to this project will be documented in this file.
 
+## _Unreleased_
+
+### Added
+
+- Multi-actor deployments: `MultiActorHandler` + `ActorResolver` with
+  per-username actor resolution, `dispatch_multi` and
+  `activitypub_router_multi` (Rust) / `pubby.handlers.MultiActorHandler`
+  (Python). Actor path templates (e.g. `/ap/users/{username}`) drive
+  per-actor actor/outbox/followers/following/liked/featured/activities
+  routes plus a shared inbox that resolves the addressed actor.
+- Authorized-fetch mode: `DispatchOptions::authorized_fetch` /
+  `activitypub_router(..., authorized_fetch)` require a valid HTTP
+  signature on AP dereference GET routes; `/.well-known` and `/nodeinfo`
+  endpoints stay unsigned.
+- `/.well-known/host-meta` (XRD) and `/.well-known/host-meta.json` (JRD)
+  endpoints via `build_host_meta`/`build_host_meta_xrd`.
+- Inbox: native `Accept`/`Reject` of this actor's outbound `Follow`s
+  (settles pending requests, fires `on_follow_response`), plus the
+  `on_activity` hook (`ActivityDisposition::Handled`/`PassThrough`) that
+  runs before built-in dispatch on every verified activity.
+- Outbox: `on_delivery_result` callback receiving a `DeliveryOutcome`
+  per delivery attempt (observe-only seam for delivery ledgers);
+  `DeliveryContext::deliver_status` returns the HTTP status.
+- Storage: `get_activities_for_actor(actor_id, limit, offset)` with a
+  filtering default implementation on the trait/ABC.
+- NodeInfo: `nodeinfo_stats` handler option (`NodeInfoStats`) supplying
+  real usage numbers instead of the hardcoded single-user report.
+- Model: optional `liked`/`featured`/`movedTo`/`alsoKnownAs` on `Actor`
+  and `ActorConfig` (both SDKs).
+- Cache: per-actor key helpers (`actor_document_key_for`,
+  `followers_key_for`, `following_key_for`, `outbox_key_for`,
+  `document_key_for` in Rust; keyword args on the Python equivalents)
+  and `RedisDocumentStore::with_prefix`.
+- HTTP: `HttpClient::new_relaxed`/`allow_private_targets` on the Rust
+  client and `HandlerOptions::allow_private_targets` — loopback/private
+  targets for development and tests only.
+
+### Security
+
+- Python: outbound federation fetches now reject unsafe targets
+  (loopback/private/link-local IP literals, `localhost`, `*.local`,
+  `*.internal`, `*.lan`, cloud metadata hosts) via
+  `pubby._http.is_safe_outbound_url`, matching the Rust SDK's guard;
+  `resolve_actor_inbox` accepts `allow_private_targets` for tests.
+
 ## _0.4.3_
 
 ### Fixed

@@ -473,6 +473,14 @@ pub struct ActorConfig {
     /// Human-readable profile URL. When set, the actor's `url` field uses
     /// this instead of `base_url`.
     pub url: Option<String>,
+    /// Liked collection URL (advertised as `liked` when set).
+    pub liked: Option<String>,
+    /// Featured (pinned posts) collection URL (`featured`).
+    pub featured: Option<String>,
+    /// `movedTo` — the actor URL this account moved to.
+    pub moved_to: Option<String>,
+    /// `alsoKnownAs` — alias actor URLs.
+    pub also_known_as: Vec<String>,
 }
 
 impl ActorConfig {
@@ -489,6 +497,10 @@ impl ActorConfig {
             manually_approves_followers: false,
             attachment: Vec::new(),
             url: None,
+            liked: None,
+            featured: None,
+            moved_to: None,
+            also_known_as: Vec::new(),
         };
         cfg.normalize();
         cfg
@@ -526,6 +538,16 @@ impl ActorConfig {
             manually_approves_followers: get_bool(data, "manually_approves_followers", false),
             attachment: get_vec(data, "attachment"),
             url: data.get("url").and_then(|v| v.as_str()).map(String::from),
+            liked: data.get("liked").and_then(|v| v.as_str()).map(String::from),
+            featured: data
+                .get("featured")
+                .and_then(|v| v.as_str())
+                .map(String::from),
+            moved_to: data
+                .get("moved_to")
+                .and_then(|v| v.as_str())
+                .map(String::from),
+            also_known_as: str_list(data.get("also_known_as")),
         };
         cfg.normalize();
         Ok(cfg)
@@ -551,6 +573,14 @@ pub struct Actor {
     pub url: String,
     pub endpoints: Map<String, Value>,
     pub attachment: Vec<Value>,
+    /// `liked` collection URL.
+    pub liked: Option<String>,
+    /// `featured` collection URL (pinned posts).
+    pub featured: Option<String>,
+    /// `movedTo` actor URL.
+    pub moved_to: Option<String>,
+    /// `alsoKnownAs` actor URLs.
+    pub also_known_as: Vec<String>,
 }
 
 impl Default for Actor {
@@ -572,6 +602,10 @@ impl Default for Actor {
             url: String::new(),
             endpoints: Map::new(),
             attachment: Vec::new(),
+            liked: None,
+            featured: None,
+            moved_to: None,
+            also_known_as: Vec::new(),
         }
     }
 }
@@ -619,6 +653,18 @@ impl Actor {
         if !self.attachment.is_empty() {
             doc["attachment"] = Value::Array(self.attachment.clone());
         }
+        if let Some(l) = &self.liked {
+            doc["liked"] = json!(l);
+        }
+        if let Some(f) = &self.featured {
+            doc["featured"] = json!(f);
+        }
+        if let Some(m) = &self.moved_to {
+            doc["movedTo"] = json!(m);
+        }
+        if !self.also_known_as.is_empty() {
+            doc["alsoKnownAs"] = json!(self.also_known_as);
+        }
         doc
     }
 
@@ -657,6 +703,10 @@ impl Actor {
             url: get_string(data, "url"),
             endpoints: get_map(data, "endpoints"),
             attachment: get_vec(data, "attachment"),
+            liked: get_str(data, "liked").map(String::from),
+            featured: get_str(data, "featured").map(String::from),
+            moved_to: get_str(data, "movedTo").map(String::from),
+            also_known_as: str_list(data.get("alsoKnownAs")),
         }
     }
 }

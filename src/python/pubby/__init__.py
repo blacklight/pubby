@@ -5,8 +5,10 @@ from ._exceptions import (
     RateLimitError,
     SignatureVerificationError,
 )
+from ._http import is_safe_outbound_url
 from ._model import (
     Activity,
+    ActivityDisposition,
     ActivityType,
     Actor,
     ActorConfig,
@@ -17,6 +19,7 @@ from ._model import (
     Interaction,
     InteractionStatus,
     InteractionType,
+    NodeInfoStats,
     Object,
     ObjectType,
 )
@@ -52,7 +55,8 @@ from .content import (
     render_verified_link,
     set_object_content,
 )
-from .handlers import ActivityPubHandler
+from .handlers import ActivityPubHandler, MultiActorHandler
+from .handlers._discovery import build_host_meta, build_host_meta_xrd
 from .handlers._outbox import (
     build_announce_activity,
     build_delete_activity,
@@ -83,6 +87,7 @@ __version__ = "0.4.3"
 
 __all__ = [
     "Activity",
+    "ActivityDisposition",
     "ActivityPubError",
     "ActivityPubHandler",
     "ActivityPubStorage",
@@ -97,6 +102,8 @@ __all__ = [
     "build_delete_activity",
     "build_follow_response",
     "build_hashtag_tags",
+    "build_host_meta",
+    "build_host_meta_xrd",
     "build_like_activity",
     "build_quote_authorization",
     "build_quote_request_activity",
@@ -127,8 +134,11 @@ __all__ = [
     "is_domain_blocked",
     "is_linkable_url",
     "is_public",
+    "is_safe_outbound_url",
     "Mention",
     "mentioned_actors",
+    "MultiActorHandler",
+    "NodeInfoStats",
     "normalize_domain",
     "Object",
     "ObjectType",

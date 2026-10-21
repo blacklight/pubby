@@ -10,8 +10,11 @@ from urllib.parse import urlparse
 
 import requests
 
+from .._http import is_safe_outbound_url
+
 from .._model import (
     Activity,
+    ActivityDisposition,
     ActivityType,
     Actor,
     Follower,
@@ -110,6 +113,9 @@ class InboxProcessor:
             Callable[[str, str], Optional[Union[FollowPolicy, str]]]
         ] = None,
         document_cache: Optional["DocumentCache"] = None,
+        on_activity=None,
+        on_follow_response=None,
+        allow_private_targets: bool = False,
     ):
         self.storage = storage
         self.actor_id = actor_id
@@ -126,6 +132,9 @@ class InboxProcessor:
         self.blocked_instances = blocked_instances
         self.strict_attribution = strict_attribution
         self.follow_policy = follow_policy
+        self.on_activity = on_activity
+        self.on_follow_response = on_follow_response
+        self.allow_private_targets = allow_private_targets
 
     def _invalidate_cached_documents(self, *prefixes) -> None:
         """Drop cached dereference documents when followers change."""
@@ -184,6 +193,9 @@ class InboxProcessor:
                 url=actor_id,
                 headers=base_headers,
             )
+            if not is_safe_outbound_url(actor_id) and not self.allow_private_targets:
+                logger.warning("Refusing unsafe outbound URL: %s", actor_id)
+                return None
             resp = requests.get(
                 actor_id,
                 headers={
@@ -370,6 +382,16 @@ class InboxProcessor:
         activity = Activity.build(activity_data)
         activity_type_str = activity.type.strip()
 
+        if self.on_activity is not None:
+            try:
+                if (
+                    self.on_activity(activity, activity_data)
+                    == ActivityDisposition.HANDLED
+                ):
+                    return None
+            except Exception:
+                logger.exception("on_activity hook failed for %s", activity_type_str)
+
         try:
             activity_type = ActivityType.from_raw(activity_type_str)
         except ValueError:
@@ -385,6 +407,8 @@ class InboxProcessor:
             ActivityType.DELETE: self._handle_delete,
             ActivityType.UPDATE: self._handle_update,
             ActivityType.QUOTE_REQUEST: self._handle_quote_request,
+            ActivityType.ACCEPT: self._handle_accept,
+            ActivityType.REJECT: self._handle_reject,
         }
 
         handler = handler_map.get(activity_type)
@@ -393,6 +417,46 @@ class InboxProcessor:
             return None
 
         return handler(activity, activity_data)
+
+    def _handle_follow_response(
+        self, activity: Activity, accepted: bool
+    ) -> Optional[dict]:
+        """Handle Accept/Reject of a Follow this actor issued."""
+        inner = activity.object if isinstance(activity.object, dict) else None
+        if inner is None or str(inner.get("type", "")).lower() != "follow":
+            return None
+        inner_actor = inner.get("actor")
+        if isinstance(inner_actor, dict):
+            inner_actor = inner_actor.get("id")
+        if inner_actor != self.actor_id:
+            return None
+        target = inner.get("object")
+        if isinstance(target, dict):
+            target = target.get("id")
+        if not target:
+            return None
+        try:
+            self.storage.remove_follow_request(self.actor_id, target)
+        except Exception:
+            logger.debug("No pending follow request to settle", exc_info=True)
+        if self.on_follow_response is not None:
+            try:
+                self.on_follow_response(target, accepted)
+            except Exception:
+                logger.exception("on_follow_response failed")
+        logger.info(
+            "%s Follow of %s (from %s)",
+            "Accepted" if accepted else "Rejected",
+            target,
+            activity.actor,
+        )
+        return None
+
+    def _handle_accept(self, activity: Activity, raw: dict) -> Optional[dict]:
+        return self._handle_follow_response(activity, True)
+
+    def _handle_reject(self, activity: Activity, raw: dict) -> Optional[dict]:
+        return self._handle_follow_response(activity, False)
 
     def _handle_follow(self, activity: Activity, raw: dict) -> Optional[dict]:
         """Handle an incoming Follow activity."""

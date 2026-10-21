@@ -591,6 +591,7 @@ class OutboxProcessor:
         allowed_instances: Collection[str] | None = None,
         blocked_instances: Collection[str] | None = None,
         deliver: Callable[[str, dict], None] | None = None,
+        on_delivery_result: Callable[[dict], None] | None = None,
         document_cache: "DocumentCache | None" = None,
         **_,
     ):
@@ -609,6 +610,7 @@ class OutboxProcessor:
         self.allowed_instances = allowed_instances
         self.blocked_instances = blocked_instances
         self.deliver = deliver
+        self.on_delivery_result = on_delivery_result
 
     def _new_activity_id(self) -> str:
         """Generate a unique activity ID."""
@@ -1122,10 +1124,16 @@ class OutboxProcessor:
         """
         for attempt in range(self.max_retries):
             try:
-                success = self._deliver(inbox_url, activity)
-                if success:
+                status = self._deliver_status(inbox_url, activity)
+                self._report_delivery(
+                    inbox_url, activity, 200 <= status < 300, status, None, attempt + 1
+                )
+                if 200 <= status < 300:
                     return True
             except Exception as e:
+                self._report_delivery(
+                    inbox_url, activity, False, None, str(e), attempt + 1
+                )
                 logger.warning(
                     "Delivery attempt %d/%d to %s failed: %s: %s",
                     attempt + 1,
@@ -1146,6 +1154,33 @@ class OutboxProcessor:
             self.max_retries,
         )
         return False
+
+    def _report_delivery(self, inbox_url, activity, ok, status, error, attempt):
+        if self.on_delivery_result is None:
+            return
+        try:
+            self.on_delivery_result(
+                {
+                    "inbox_url": inbox_url,
+                    "activity_id": activity.get("id", ""),
+                    "ok": ok,
+                    "status": status,
+                    "error": error,
+                    "attempt": attempt,
+                }
+            )
+        except Exception:
+            logger.exception("on_delivery_result callback failed")
+
+    def _deliver_status(self, inbox_url: str, activity: dict) -> int:
+        return deliver_activity(
+            activity,
+            inbox_url,
+            key_id=self.key_id,
+            private_key=self.private_key,  # type: ignore
+            user_agent=self.user_agent,
+            timeout=self.http_timeout,
+        )
 
     def _deliver(self, inbox_url: str, activity: dict) -> bool:
         """

@@ -996,8 +996,8 @@ def route_key(*elements: Hashable) -> CacheKey:
     return (ROUTE_NAMESPACE,) + tuple(elements)
 
 
-def actor_document_key() -> CacheKey:
-    return route_key("actor")
+def actor_document_key(username: str | None = None) -> CacheKey:
+    return route_key("actor") if username is None else route_key("actor", username)
 
 
 def normalize_webfinger_resource(resource: str) -> str:
@@ -1033,16 +1033,25 @@ def nodeinfo_discovery_key() -> CacheKey:
     return route_key("nodeinfo-discovery")
 
 
-def outbox_key(limit: int, offset: int) -> CacheKey:
-    return route_key("outbox", int(limit), int(offset))
+def outbox_key(limit: int, offset: int, username: str | None = None) -> CacheKey:
+    parts = (
+        ("outbox", int(limit), int(offset))
+        if username is None
+        else ("outbox", username, int(limit), int(offset))
+    )
+    return route_key(*parts)
 
 
-def followers_key() -> CacheKey:
-    return route_key("followers")
+def followers_key(username: str | None = None) -> CacheKey:
+    return (
+        route_key("followers") if username is None else route_key("followers", username)
+    )
 
 
-def following_key() -> CacheKey:
-    return route_key("following")
+def following_key(username: str | None = None) -> CacheKey:
+    return (
+        route_key("following") if username is None else route_key("following", username)
+    )
 
 
 def quote_authorization_key(auth_id: str) -> CacheKey:

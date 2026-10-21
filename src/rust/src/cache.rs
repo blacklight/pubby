@@ -1010,6 +1010,11 @@ pub fn actor_document_key() -> CacheKey {
     route_key(&["actor"])
 }
 
+/// Cache key for one actor's document (multi-actor deployments).
+pub fn actor_document_key_for(username: &str) -> CacheKey {
+    route_key(&["actor", username])
+}
+
 /// Normalize a *valid* WebFinger `resource` parameter to `user@domain`.
 pub fn normalize_webfinger_resource(resource: &str) -> String {
     let mut normalized = resource;
@@ -1039,14 +1044,34 @@ pub fn outbox_key(limit: i64, offset: i64) -> CacheKey {
     route_key(&["outbox", &limit.to_string(), &offset.to_string()])
 }
 
+/// Cache key for one actor's outbox page (multi-actor deployments).
+pub fn outbox_key_for(username: &str, limit: i64, offset: i64) -> CacheKey {
+    route_key(&["outbox", username, &limit.to_string(), &offset.to_string()])
+}
+
 /// Cache key for the followers collection.
 pub fn followers_key() -> CacheKey {
     route_key(&["followers"])
 }
 
+/// Cache key for one actor's followers collection.
+pub fn followers_key_for(username: &str) -> CacheKey {
+    route_key(&["followers", username])
+}
+
 /// Cache key for the following collection.
 pub fn following_key() -> CacheKey {
     route_key(&["following"])
+}
+
+/// Cache key for one actor's following collection.
+pub fn following_key_for(username: &str) -> CacheKey {
+    route_key(&["following", username])
+}
+
+/// Cache key for a dereferenced activity envelope or object document.
+pub fn document_key_for(username: &str, kind: &str, id: &str) -> CacheKey {
+    route_key(&[kind, username, id])
 }
 
 /// Cache key for a quote authorization document.
@@ -1085,6 +1110,15 @@ impl RedisDocumentStore {
         RedisDocumentStore {
             client,
             prefix: Self::DEFAULT_PREFIX.to_string(),
+        }
+    }
+
+    /// Create a store over `client` with a custom key prefix — useful
+    /// when several applications share one Redis instance.
+    pub fn with_prefix(client: redis::Client, prefix: impl Into<String>) -> Self {
+        RedisDocumentStore {
+            client,
+            prefix: prefix.into(),
         }
     }
 

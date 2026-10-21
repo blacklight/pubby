@@ -46,7 +46,7 @@ fn test_axum_activitypub_routes() {
 async fn test_axum_activitypub_routes_async() {
     let dir = tempfile::tempdir().unwrap();
     let handler = make_handler(&dir);
-    let router = activitypub_router(handler, "/ap", None, None, None);
+    let router = activitypub_router(handler, "/ap", None, None, None, false);
 
     let (status, doc) = call(router.clone(), "/ap/actor").await;
     assert_eq!(status, StatusCode::OK);

@@ -114,6 +114,8 @@ pub fn is_safe_outbound_url(url: &str) -> bool {
 pub struct HttpClient {
     agent: ureq::Agent,
     timeout: Duration,
+    /// Allow loopback/private targets — development and tests only.
+    allow_private: bool,
 }
 
 impl Default for HttpClient {
@@ -136,7 +138,27 @@ impl HttpClient {
         HttpClient {
             agent: config.into(),
             timeout,
+            allow_private: false,
         }
+    }
+
+    /// Create a client that also accepts loopback/private targets.
+    ///
+    /// For development and tests only — a public URL must never be
+    /// redirected into a private one, so per-hop validation still
+    /// applies to redirects when the original target was public.
+    pub fn new_relaxed(timeout: Duration) -> Self {
+        let mut client = Self::new(timeout);
+        client.allow_private = true;
+        client
+    }
+
+    /// Allow (or disallow) loopback/private targets on this client.
+    ///
+    /// For development and tests only.
+    pub fn allow_private_targets(&mut self, allow: bool) -> &mut Self {
+        self.allow_private = allow;
+        self
     }
 
     /// The configured per-request timeout.
@@ -150,11 +172,16 @@ impl HttpClient {
     /// exactly like every redirect hop.
     pub fn get(&self, url: &str, headers: &HashMap<String, String>) -> Result<HttpResponse> {
         let mut url = url.to_string();
-        if !is_safe_outbound_url(&url) {
+        let initial_safe = is_safe_outbound_url(&url);
+        if !initial_safe && !self.allow_private {
             return Err(ActivityPubError::General(format!(
                 "refusing unsafe outbound URL: {url}"
             )));
         }
+        // Relaxed mode only clears the *initial* check when the target is
+        // private; a public target still gets per-hop validation so it can
+        // never be bounced to an internal address.
+        let check_hops = !self.allow_private || initial_safe;
         for hop in 0..=MAX_REDIRECTS {
             let mut req = self.agent.get(&url);
             for (k, v) in headers {
@@ -174,7 +201,7 @@ impl HttpClient {
                         .and_then(|base| base.join(&loc).ok())
                         .map(|u| u.to_string())
                         .unwrap_or(loc);
-                    if !is_safe_outbound_url(&next) {
+                    if check_hops && !is_safe_outbound_url(&next) {
                         log::warn!("Refusing redirect to unsafe URL: {next}");
                         return read_response(resp);
                     }
@@ -198,7 +225,7 @@ impl HttpClient {
         headers: &HashMap<String, String>,
         body: &[u8],
     ) -> Result<HttpResponse> {
-        if !is_safe_outbound_url(url) {
+        if !is_safe_outbound_url(url) && !self.allow_private {
             return Err(ActivityPubError::General(format!(
                 "refusing unsafe outbound URL: {url}"
             )));

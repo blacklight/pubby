@@ -129,12 +129,15 @@ async fn serve_req(State(s): State<ApState>, req: Request) -> Response {
 /// :param document_cache: Optional `DocumentCache` shared by dereference
 ///     endpoints (falls back to `handler.document_cache`).
 /// :param rate_limit_key: Optional request → bucket-key extractor.
+/// :param authorized_fetch: Require a valid HTTP signature on AP
+///     dereference GET routes (`/.well-known` and `/nodeinfo` stay open).
 pub fn activitypub_router(
     handler: Arc<ActivityPubHandler>,
     prefix: &str,
     rate_limiter: Option<Arc<RateLimiter>>,
     document_cache: Option<Arc<crate::cache::DocumentCache>>,
     rate_limit_key: Option<super::RateLimitKeyFn>,
+    authorized_fetch: bool,
 ) -> Router {
     let prefix = normalize_prefix(prefix);
     let state = ApState {
@@ -144,12 +147,15 @@ pub fn activitypub_router(
             rate_limiter,
             document_cache,
             rate_limit_key,
+            authorized_fetch,
         }),
     };
 
     let well_known = Router::new()
         .route("/.well-known/webfinger", get(serve_req))
         .route("/.well-known/nodeinfo", get(serve_req))
+        .route("/.well-known/host-meta", get(serve_req))
+        .route("/.well-known/host-meta.json", get(serve_req))
         .route("/nodeinfo/2.1", get(serve_req))
         .route("/nodeinfo/2.0", get(serve_req))
         .route("/nodeinfo/2.0.json", get(serve_req))
@@ -172,6 +178,100 @@ pub fn activitypub_router(
         .merge(well_known)
         .nest(state.prefix.as_str(), ap)
         .merge(qa)
+        .with_state(state)
+}
+
+/// Shared state for the multi-actor adapter.
+#[derive(Clone)]
+struct ApMultiState {
+    multi: Arc<crate::handlers::MultiActorHandler>,
+    prefix: Arc<String>,
+    options: Arc<DispatchOptions>,
+}
+
+async fn serve_req_multi(State(s): State<ApMultiState>, req: Request) -> Response {
+    let resp = match make_request(req).await {
+        Ok(dreq) => super::dispatch_multi(&s.multi, &dreq, &s.prefix, &s.options),
+        Err(e) => return *e,
+    };
+    into_response(resp)
+}
+
+/// Bind the multi-actor ActivityPub routes to an axum `Router`.
+///
+/// Registers the same well-known endpoints as [`activitypub_router`]
+/// plus, derived from `handler.actor_path_template` (e.g.
+/// `/ap/users/{username}` — the placeholder is a literal axum path
+/// param): the actor document, `inbox`/`outbox`/`followers`/`following`/
+/// `liked`/`collections/featured`, `activities/{id}` and
+/// `quote_authorizations/{id}` per actor, plus `{prefix}/actor` and the
+/// shared `POST {prefix}/inbox`.
+pub fn activitypub_router_multi(
+    handler: Arc<crate::handlers::MultiActorHandler>,
+    prefix: &str,
+    rate_limiter: Option<Arc<RateLimiter>>,
+    document_cache: Option<Arc<crate::cache::DocumentCache>>,
+    rate_limit_key: Option<super::RateLimitKeyFn>,
+    authorized_fetch: bool,
+) -> Router {
+    let prefix = normalize_prefix(prefix);
+    let state = ApMultiState {
+        multi: handler,
+        prefix: Arc::new(prefix.clone()),
+        options: Arc::new(DispatchOptions {
+            rate_limiter,
+            document_cache,
+            rate_limit_key,
+            authorized_fetch,
+        }),
+    };
+
+    let well_known = Router::new()
+        .route("/.well-known/webfinger", get(serve_req_multi))
+        .route("/.well-known/nodeinfo", get(serve_req_multi))
+        .route("/.well-known/host-meta", get(serve_req_multi))
+        .route("/.well-known/host-meta.json", get(serve_req_multi))
+        .route("/nodeinfo/2.1", get(serve_req_multi))
+        .route("/nodeinfo/2.0", get(serve_req_multi))
+        .route("/nodeinfo/2.0.json", get(serve_req_multi))
+        .route("/nodeinfo/2.1.json", get(serve_req_multi));
+
+    // The template contains a literal `{username}` segment — already
+    // axum's `{name}` path-param syntax.
+    let tpl = state.multi.actor_path_template.clone();
+    let mut ap = Router::new()
+        .route("/actor", get(serve_req_multi))
+        .route("/inbox", post(serve_req_multi))
+        .route("/outbox", get(serve_req_multi))
+        .route("/followers", get(serve_req_multi))
+        .route("/following", get(serve_req_multi));
+    // Per-actor routes live outside the prefix — the template carries
+    // its own leading path (e.g. "/ap/users/{username}").
+    ap = ap.merge(
+        Router::new()
+            .route(&tpl, get(serve_req_multi))
+            .route(&format!("{tpl}/inbox"), post(serve_req_multi))
+            .route(&format!("{tpl}/outbox"), get(serve_req_multi))
+            .route(&format!("{tpl}/followers"), get(serve_req_multi))
+            .route(&format!("{tpl}/following"), get(serve_req_multi))
+            .route(&format!("{tpl}/liked"), get(serve_req_multi))
+            .route(
+                &format!("{tpl}/collections/featured"),
+                get(serve_req_multi),
+            )
+            .route(
+                &format!("{tpl}/activities/{{*rest}}"),
+                get(serve_req_multi),
+            )
+            .route(
+                &format!("{tpl}/quote_authorizations/{{*rest}}"),
+                get(serve_req_multi),
+            ),
+    );
+
+    Router::new()
+        .merge(well_known)
+        .nest(&prefix, ap)
         .with_state(state)
 }
 
