@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## _Unreleased_
+## _0.4.3_
 
 ### Fixed
 
