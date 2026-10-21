@@ -2,12 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
-## _Unreleased_
+## _0.4.2_
 
 ### Fixed
 
 - Isolate release-version tests from the repository changelog so builds still
-  pass after a release consumes the `Unreleased` heading.
+  pass after a release consumes the `0.4.2` heading.
 
 ## _0.4.1_
 
