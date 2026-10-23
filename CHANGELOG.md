@@ -6,10 +6,11 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- Rust: `HttpClient::max_body_bytes` builder-style setter to override
-  the per-client response body cap (default `MAX_BODY_BYTES`, 16 MiB)
-  for callers fetching bulk remote media; all in-crate callers keep
-  the default.
+- `http` (Rust): `HttpClient::max_body_bytes` builder-style setter to
+  override the per-client response body cap (default `MAX_BODY_BYTES`,
+  16 MiB) for callers fetching bulk remote media; all in-crate callers
+  keep the default
+  ([`06ec880`](https://git.platypush.tech/blacklight/pubby/commit/06ec880c4d3068269031bb7cd4d079870b38ab05)).
 
 ## 0.6.0
 
