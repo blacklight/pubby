@@ -11,7 +11,8 @@
 //!   loopback/link-local/private/unspecified IP literals and common
 //!   internal hostnames — an actor document or WebFinger response cannot
 //!   bounce a request to `169.254.169.254` or `localhost`.
-//! - Response bodies are capped at [`MAX_BODY_BYTES`].
+//! - Response bodies are capped at [`MAX_BODY_BYTES`] unless the client
+//!   overrides the cap via [`HttpClient::max_body_bytes`].
 
 use std::collections::HashMap;
 use std::net::IpAddr;
@@ -21,7 +22,7 @@ use serde_json::Value;
 
 use crate::error::{ActivityPubError, Result};
 
-/// Maximum response body size accepted (16 MiB).
+/// Default maximum response body size accepted (16 MiB).
 pub const MAX_BODY_BYTES: u64 = 16 * 1024 * 1024;
 
 /// Maximum redirect hops followed for a GET request.
@@ -116,6 +117,8 @@ pub struct HttpClient {
     timeout: Duration,
     /// Allow loopback/private targets — development and tests only.
     allow_private: bool,
+    /// Maximum response body size accepted.
+    max_body_bytes: u64,
 }
 
 impl Default for HttpClient {
@@ -139,6 +142,7 @@ impl HttpClient {
             agent: config.into(),
             timeout,
             allow_private: false,
+            max_body_bytes: MAX_BODY_BYTES,
         }
     }
 
@@ -158,6 +162,14 @@ impl HttpClient {
     /// For development and tests only.
     pub fn allow_private_targets(&mut self, allow: bool) -> &mut Self {
         self.allow_private = allow;
+        self
+    }
+
+    /// Override the response body cap for this client (default:
+    /// [`MAX_BODY_BYTES`]). Raising it is appropriate only for endpoints
+    /// known to serve bulk media; federation documents stay small.
+    pub fn max_body_bytes(&mut self, limit: u64) -> &mut Self {
+        self.max_body_bytes = limit;
         self
     }
 
@@ -203,13 +215,13 @@ impl HttpClient {
                         .unwrap_or(loc);
                     if check_hops && !is_safe_outbound_url(&next) {
                         log::warn!("Refusing redirect to unsafe URL: {next}");
-                        return read_response(resp);
+                        return read_response(resp, self.max_body_bytes);
                     }
                     url = next;
                     continue;
                 }
             }
-            return read_response(resp);
+            return read_response(resp, self.max_body_bytes);
         }
         unreachable!("loop is bounded")
     }
@@ -235,18 +247,142 @@ impl HttpClient {
             req = req.header(k, v);
         }
         let resp = req.send(body)?;
-        read_response(resp)
+        read_response(resp, self.max_body_bytes)
     }
 }
 
-fn read_response(resp: ureq::http::Response<ureq::Body>) -> Result<HttpResponse> {
+fn read_response(resp: ureq::http::Response<ureq::Body>, limit: u64) -> Result<HttpResponse> {
     let status = resp.status().as_u16();
     let mut resp = resp;
     let body = resp
         .body_mut()
         .with_config()
-        .limit(MAX_BODY_BYTES)
+        .limit(limit)
         .read_to_vec()
         .map_err(|e| ActivityPubError::General(format!("failed to read response body: {e}")))?;
     Ok(HttpResponse { status, body })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread::JoinHandle;
+
+    /// Spawn a one-shot loopback origin that replies with the given raw
+    /// response bytes once the request headers have been read. Returns
+    /// the URL to request and the server thread handle.
+    fn serve_once(response: Vec<u8>) -> (String, JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut received = Vec::new();
+            let mut buf = [0u8; 4096];
+            // Consume the request headers before writing the response.
+            while !received.windows(4).any(|w| w == b"\r\n\r\n") {
+                match stream.read(&mut buf) {
+                    Ok(0) | Err(_) => return,
+                    Ok(n) => received.extend_from_slice(&buf[..n]),
+                }
+            }
+            // An over-limit body is abandoned by the client, so a
+            // late write can hit a closed socket — not a test failure.
+            let _ = stream.write_all(&response);
+            let _ = stream.flush();
+        });
+        (format!("http://127.0.0.1:{port}/"), handle)
+    }
+
+    fn fixed_length_response(body: &[u8]) -> Vec<u8> {
+        let head = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\n\r\n",
+            body.len()
+        );
+        let mut response = head.into_bytes();
+        response.extend_from_slice(body);
+        response
+    }
+
+    fn chunked_response(body: &[u8]) -> Vec<u8> {
+        let mut response =
+            b"HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nTransfer-Encoding: chunked\r\n\r\n"
+                .to_vec();
+        for chunk in body.chunks(1024 * 1024) {
+            response.extend_from_slice(format!("{:x}\r\n", chunk.len()).as_bytes());
+            response.extend_from_slice(chunk);
+            response.extend_from_slice(b"\r\n");
+        }
+        response.extend_from_slice(b"0\r\n\r\n");
+        response
+    }
+
+    fn relaxed_client() -> HttpClient {
+        let mut client = HttpClient::new(Duration::from_secs(30));
+        client.allow_private_targets(true);
+        client
+    }
+
+    fn get(client: &HttpClient, response: Vec<u8>) -> (Result<HttpResponse>, JoinHandle<()>) {
+        let (url, handle) = serve_once(response);
+        (client.get(&url, &HashMap::new()), handle)
+    }
+
+    #[test]
+    fn body_within_default_cap_succeeds() {
+        let body = vec![42u8; 4096];
+        let (result, handle) = get(&relaxed_client(), fixed_length_response(&body));
+        handle.join().unwrap();
+        let resp = result.unwrap();
+        assert!(resp.is_success());
+        assert_eq!(resp.body, body);
+    }
+
+    #[test]
+    fn default_cap_rejects_oversized_content_length() {
+        let body = vec![1u8; MAX_BODY_BYTES as usize + 1];
+        let (result, handle) = get(&relaxed_client(), fixed_length_response(&body));
+        handle.join().unwrap();
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("larger than request limit"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn default_cap_rejects_oversized_chunked() {
+        let body = vec![1u8; MAX_BODY_BYTES as usize + 1];
+        let (result, handle) = get(&relaxed_client(), chunked_response(&body));
+        handle.join().unwrap();
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("larger than request limit"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn raised_cap_accepts_large_body() {
+        let mut client = relaxed_client();
+        client.max_body_bytes(64 * 1024 * 1024);
+        let body = vec![7u8; MAX_BODY_BYTES as usize + 1];
+        let (result, handle) = get(&client, fixed_length_response(&body));
+        handle.join().unwrap();
+        assert_eq!(result.unwrap().body, body);
+    }
+
+    #[test]
+    fn lowered_cap_rejects_small_body() {
+        let mut client = relaxed_client();
+        client.max_body_bytes(8);
+        let (result, handle) = get(&client, fixed_length_response(&vec![0u8; 64]));
+        handle.join().unwrap();
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("larger than request limit"),
+            "unexpected error: {err}"
+        );
+    }
 }

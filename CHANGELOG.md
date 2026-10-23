@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- Rust: `HttpClient::max_body_bytes` builder-style setter to override
+  the per-client response body cap (default `MAX_BODY_BYTES`, 16 MiB)
+  for callers fetching bulk remote media; all in-crate callers keep
+  the default.
+
 ## 0.6.0
 
 ### Added
