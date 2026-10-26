@@ -64,6 +64,19 @@ class TestKeyExportAndLoad:
         loaded = load_public_key(pem.encode("utf-8"))
         assert isinstance(loaded, rsa.RSAPublicKey)
 
+    def test_load_public_key_tolerates_envelope_noise(self, rsa_keypair):
+        _, public_key = rsa_keypair
+        pem = export_public_key_pem(public_key)
+        # Akkoma-style publicKeyPem envelopes: trailing blank lines,
+        # CRLF line endings, or text outside the encapsulation block.
+        for variant in (
+            pem + "\n",
+            pem.replace("\n", "\r\n"),
+            f"preamble\n{pem}\n\n",
+        ):
+            loaded = load_public_key(variant)
+            assert export_public_key_pem(loaded) == pem
+
     def test_load_private_key_from_bytes(self, rsa_keypair):
         private_key, _ = rsa_keypair
         pem = export_private_key_pem(private_key)

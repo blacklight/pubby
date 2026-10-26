@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- `crypto` (Rust): `load_public_key`/`load_private_key` normalize the
+  PEM envelope before parsing — line endings become LF and anything
+  outside the first `BEGIN`/`END` block is dropped. Fixes HTTP
+  signature verification against actors whose `publicKeyPem` the
+  strict RFC 7468 parser rejects (e.g. Akkoma appends a trailing
+  blank line).
+
 ## 0.6.1
 
 ### Added

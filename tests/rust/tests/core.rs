@@ -113,6 +113,27 @@ fn test_key_pem_roundtrip() {
 }
 
 #[test]
+fn test_key_pem_tolerates_envelope_noise() {
+    let (priv_key, pub_key) = generate_rsa_keypair(2048).unwrap();
+    let priv_pem = export_private_key_pem(&priv_key).unwrap();
+    let pub_pem = export_public_key_pem(&pub_key).unwrap();
+    // Akkoma-style `publicKeyPem` envelopes: trailing blank lines,
+    // CRLF line endings, or text outside the encapsulation block.
+    for variant in [
+        format!("{pub_pem}\n"),
+        pub_pem.replace('\n', "\r\n"),
+        format!("preamble\n{pub_pem}\n\n"),
+    ] {
+        let parsed = load_public_key(&variant).expect("public key should parse");
+        assert_eq!(export_public_key_pem(&parsed).unwrap(), pub_pem);
+    }
+    for variant in [format!("{priv_pem}\n"), priv_pem.replace('\n', "\r\n")] {
+        let parsed = load_private_key(&variant).expect("private key should parse");
+        assert_eq!(export_private_key_pem(&parsed).unwrap(), priv_pem);
+    }
+}
+
+#[test]
 fn test_moderation() {
     assert_eq!(normalize_domain("HTTPS://Example.COM:443/x"), "example.com");
     assert_eq!(extract_domain("https://a.b/users/alice"), "a.b");

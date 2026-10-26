@@ -29,7 +29,7 @@ pub fn generate_rsa_keypair(key_size: usize) -> Result<(RsaPrivateKey, RsaPublic
 /// :param pem_data: PEM-encoded private key string or bytes.
 /// :return: The loaded RSA private key.
 pub fn load_private_key(pem_data: impl AsRef<[u8]>) -> Result<RsaPrivateKey> {
-    let pem = String::from_utf8_lossy(pem_data.as_ref());
+    let pem = normalize_pem(&String::from_utf8_lossy(pem_data.as_ref()));
     RsaPrivateKey::from_pkcs8_pem(&pem)
         .or_else(|_| RsaPrivateKey::from_pkcs1_pem(&pem))
         .map_err(|e| ActivityPubError::InvalidValue(format!("invalid private key: {e}")))
@@ -40,10 +40,31 @@ pub fn load_private_key(pem_data: impl AsRef<[u8]>) -> Result<RsaPrivateKey> {
 /// Accepts both SPKI (`BEGIN PUBLIC KEY`) and the PKCS#1
 /// (`BEGIN RSA PUBLIC KEY`) form many existing fediverse keys use.
 pub fn load_public_key(pem_data: impl AsRef<[u8]>) -> Result<RsaPublicKey> {
-    let pem = String::from_utf8_lossy(pem_data.as_ref());
+    let pem = normalize_pem(&String::from_utf8_lossy(pem_data.as_ref()));
     RsaPublicKey::from_public_key_pem(&pem)
         .or_else(|_| RsaPublicKey::from_pkcs1_pem(&pem))
         .map_err(|e| ActivityPubError::InvalidValue(format!("invalid public key: {e}")))
+}
+
+/// Normalize a PEM document for the strict RFC 7468 parser: line
+/// endings become LF and everything outside the first
+/// `BEGIN`/`END` encapsulation block is dropped. Some fediverse
+/// software ships `publicKeyPem` values the strict parser rejects —
+/// e.g. Akkoma appends a trailing blank line.
+fn normalize_pem(pem: &str) -> String {
+    let pem = pem.replace("\r\n", "\n").replace('\r', "\n");
+    let Some(begin) = pem.find("-----BEGIN ") else {
+        return pem.trim().to_string();
+    };
+    let block = &pem[begin..];
+    match block.find("-----END ") {
+        Some(i) => {
+            let tail = &block[i..];
+            let end = tail.find('\n').map(|n| i + n).unwrap_or(block.len());
+            format!("{}\n", block[..end].trim_end())
+        }
+        None => block.trim_end().to_string(),
+    }
 }
 
 /// Export an RSA public key as a PEM-encoded string (SPKI format).
