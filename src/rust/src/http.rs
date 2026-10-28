@@ -206,9 +206,10 @@ impl HttpClient {
         // private; a public target still gets per-hop validation so it can
         // never be bounced to an internal address.
         let check_hops = !self.allow_private || initial_safe;
+        let mut headers = headers.clone();
         for hop in 0..=MAX_REDIRECTS {
             let mut req = self.agent.get(&url);
-            for (k, v) in headers {
+            for (k, v) in &headers {
                 req = req.header(k, v);
             }
             let resp = req.call()?;
@@ -229,6 +230,27 @@ impl HttpClient {
                         log::warn!("Refusing redirect to unsafe URL: {next}");
                         return read_response(resp, self.max_body_bytes, url);
                     }
+                    // `Host` is the request URL's authority — never
+                    // replay it: a canonical-domain redirect would
+                    // bounce the request to its target with the
+                    // previous hop's host (a redirect loop). And
+                    // signed/credential headers must not cross origins
+                    // — they cover `(request-target)`/host and would
+                    // leak the caller's signature to a different domain.
+                    let origin_changed = url::Url::parse(&next)
+                        .ok()
+                        .and_then(|n| url::Url::parse(&url).ok().map(|u| (n, u)))
+                        .map(|(n, u)| {
+                            (n.scheme(), n.host_str(), n.port_or_known_default())
+                                != (u.scheme(), u.host_str(), u.port_or_known_default())
+                        })
+                        .unwrap_or(false);
+                    headers.retain(|k, _| {
+                        !(k.eq_ignore_ascii_case("host")
+                            || (origin_changed
+                                && (k.eq_ignore_ascii_case("signature")
+                                    || k.eq_ignore_ascii_case("authorization"))))
+                    });
                     url = next;
                     continue;
                 }
@@ -309,6 +331,32 @@ mod tests {
             }
             // An over-limit body is abandoned by the client, so a
             // late write can hit a closed socket — not a test failure.
+            let _ = stream.write_all(&response);
+            let _ = stream.flush();
+        });
+        (format!("http://127.0.0.1:{port}/"), handle)
+    }
+
+    /// Spawn a loopback origin that replies once with `response` and
+    /// forwards the raw request head through `tx`.
+    fn serve_once_report_head(
+        response: Vec<u8>,
+        tx: std::sync::mpsc::Sender<String>,
+    ) -> (String, JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut received = Vec::new();
+            let mut buf = [0u8; 4096];
+            while !received.windows(4).any(|w| w == b"\r\n\r\n") {
+                match stream.read(&mut buf) {
+                    Ok(0) | Err(_) => return,
+                    Ok(n) => received.extend_from_slice(&buf[..n]),
+                }
+            }
+            let head = String::from_utf8_lossy(&received).to_string();
+            let _ = tx.send(head);
             let _ = stream.write_all(&response);
             let _ = stream.flush();
         });
@@ -402,6 +450,39 @@ mod tests {
         assert!(resp.is_success());
         assert!(resp.final_url.ends_with("/final"));
         assert_ne!(resp.final_url, url);
+    }
+
+    #[test]
+    fn redirect_hop_recomputes_host_and_drops_signature_cross_origin() {
+        // Server A (origin 1) 302s to server B (origin 2 — different
+        // port). The hop must not replay A's Host/Signature: B's Host
+        // is recomputed from its own URL or the canonical-domain
+        // redirect loops forever.
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (b_url, b_handle) =
+            serve_once_report_head(fixed_length_response(b"ok"), tx);
+        let redirect = format!(
+            "HTTP/1.1 302 Found\r\nContent-Length: 0\r\nLocation: {b_url}final\r\n\r\n"
+        )
+        .into_bytes();
+        let (a_url, a_handle) = serve_once(redirect);
+        let mut headers = HashMap::new();
+        headers.insert("Host".to_string(), "a.example".to_string());
+        headers.insert("Signature".to_string(), "sig".to_string());
+        headers.insert("Authorization".to_string(), "Bearer t".to_string());
+        let resp = relaxed_client().get(&a_url, &headers).unwrap();
+        a_handle.join().unwrap();
+        b_handle.join().unwrap();
+        assert!(resp.is_success());
+        let head = rx.recv().unwrap().to_lowercase();
+        // B saw its own authority, not A's stale Host header — and no
+        // credential headers crossed origins.
+        let b_authority = b_url
+            .trim_start_matches("http://")
+            .trim_end_matches('/');
+        assert!(head.contains(&format!("host: {b_authority}")), "{head}");
+        assert!(!head.contains("signature:"), "{head}");
+        assert!(!head.contains("authorization:"), "{head}");
     }
 
     #[test]

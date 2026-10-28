@@ -21,9 +21,11 @@ class FakeSession:
     def __init__(self, responses):
         self.responses = list(responses)
         self.urls = []
+        self.headers_seen = []
 
     def get(self, url, **kwargs):
         self.urls.append(url)
+        self.headers_seen.append(kwargs.get("headers") or {})
         return self.responses.pop(0)(url)
 
 
@@ -63,6 +65,53 @@ class TestGuardedGet:
             "https://web.test/post/1",
             "https://ap.test/objects/1",
         ]
+
+    def test_drops_host_and_credentials_on_cross_origin_redirect(self):
+        # Signed-fetch headers are bound to the request target — the
+        # next hop must recompute Host and not carry the signature to
+        # a different origin.
+        sess = FakeSession(
+            [
+                lambda url: FakeResponse(
+                    url, status_code=302, location="https://ap.test/objects/1"
+                ),
+                lambda url: FakeResponse(url),
+            ]
+        )
+        guarded_get(
+            "https://web.test/post/1",
+            headers={
+                "Host": "web.test",
+                "Signature": "sig",
+                "Authorization": "Bearer x",
+                "Accept": "application/activity+json",
+            },
+            timeout=5,
+            session=sess,
+        )
+        second = sess.headers_seen[1]
+        assert "Host" not in second
+        assert "Signature" not in second
+        assert "Authorization" not in second
+        assert second["Accept"] == "application/activity+json"
+
+    def test_keeps_signature_on_same_origin_redirect(self):
+        sess = FakeSession(
+            [
+                lambda url: FakeResponse(url, status_code=302, location="/other/path"),
+                lambda url: FakeResponse(url),
+            ]
+        )
+        guarded_get(
+            "https://web.test/post/1",
+            headers={"Host": "web.test", "Signature": "sig"},
+            timeout=5,
+            session=sess,
+        )
+        second = sess.headers_seen[1]
+        assert "Host" not in second
+        assert second["Signature"] == "sig"
+        assert sess.urls[1] == "https://web.test/other/path"
 
     def test_refuses_redirect_to_private_target(self):
         sess = FakeSession(

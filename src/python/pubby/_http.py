@@ -81,6 +81,7 @@ def guarded_get(
 
         raise ActivityPubError(f"refusing unsafe outbound URL: {url}")
     check_hops = not allow_private_targets or safe
+    headers = dict(headers)
     for _hop in range(_MAX_REDIRECTS + 1):
         resp = sess.get(
             url,
@@ -106,6 +107,29 @@ def guarded_get(
                     "Refusing redirect to unsafe URL: %s", nxt
                 )
                 return resp
+            # `Host` is the request URL's authority — never replay it:
+            # a canonical-domain redirect would bounce the request to
+            # its target with the previous hop's host (a redirect
+            # loop). And signed/credential headers must not cross
+            # origins — they cover `(request-target)`/host and would
+            # leak the caller's signature to a different domain.
+            cur = urlparse(url)
+            nxt_p = urlparse(nxt)
+            origin_changed = (
+                cur.scheme,
+                (cur.hostname or "").lower(),
+                cur.port,
+            ) != (
+                nxt_p.scheme,
+                (nxt_p.hostname or "").lower(),
+                nxt_p.port,
+            )
+            headers = {
+                k: v
+                for k, v in headers.items()
+                if k.lower() != "host"
+                and not (origin_changed and k.lower() in ("signature", "authorization"))
+            }
             url = nxt
             continue
         return resp

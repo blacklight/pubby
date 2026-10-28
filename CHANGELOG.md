@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- `http` (Rust) / `_http` (Python): redirect hops recompute `Host`
+  and drop `Signature`/`Authorization` when the origin changes.
+  Replaying the signed-fetch headers verbatim sent the previous
+  hop's authority to the redirect target — canonical-domain
+  redirects (web permalink → AP domain) looped until the hop budget
+  ran out — and leaked the request signature to a different domain.
+
 ## 0.6.3
 
 ### Added
