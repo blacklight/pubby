@@ -35,6 +35,16 @@ pub struct HttpResponse {
     pub status: u16,
     /// Response body bytes.
     pub body: Vec<u8>,
+    /// The URL this response was actually served from — the last
+    /// redirect hop followed by [`HttpClient::get`], or the request
+    /// URL itself when no redirect was followed. [`HttpClient::post`]
+    /// never follows redirects, so there it is always the request URL.
+    ///
+    /// Fetchers that verify an object's `id` against the origin that
+    /// served it should compare against `final_url`: a server may
+    /// legitimately redirect a web permalink to its canonical
+    /// ActivityPub domain.
+    pub final_url: String,
 }
 
 impl HttpResponse {
@@ -181,7 +191,9 @@ impl HttpClient {
     /// Perform a GET request, following validated redirects.
     ///
     /// The initial target is screened by [`is_safe_outbound_url`]
-    /// exactly like every redirect hop.
+    /// exactly like every redirect hop. The response's
+    /// [`HttpResponse::final_url`] is the URL of the last request —
+    /// the post-redirect location.
     pub fn get(&self, url: &str, headers: &HashMap<String, String>) -> Result<HttpResponse> {
         let mut url = url.to_string();
         let initial_safe = is_safe_outbound_url(&url);
@@ -215,13 +227,13 @@ impl HttpClient {
                         .unwrap_or(loc);
                     if check_hops && !is_safe_outbound_url(&next) {
                         log::warn!("Refusing redirect to unsafe URL: {next}");
-                        return read_response(resp, self.max_body_bytes);
+                        return read_response(resp, self.max_body_bytes, url);
                     }
                     url = next;
                     continue;
                 }
             }
-            return read_response(resp, self.max_body_bytes);
+            return read_response(resp, self.max_body_bytes, url);
         }
         unreachable!("loop is bounded")
     }
@@ -247,11 +259,15 @@ impl HttpClient {
             req = req.header(k, v);
         }
         let resp = req.send(body)?;
-        read_response(resp, self.max_body_bytes)
+        read_response(resp, self.max_body_bytes, url.to_string())
     }
 }
 
-fn read_response(resp: ureq::http::Response<ureq::Body>, limit: u64) -> Result<HttpResponse> {
+fn read_response(
+    resp: ureq::http::Response<ureq::Body>,
+    limit: u64,
+    final_url: String,
+) -> Result<HttpResponse> {
     let status = resp.status().as_u16();
     let mut resp = resp;
     let body = resp
@@ -260,7 +276,11 @@ fn read_response(resp: ureq::http::Response<ureq::Body>, limit: u64) -> Result<H
         .limit(limit)
         .read_to_vec()
         .map_err(|e| ActivityPubError::General(format!("failed to read response body: {e}")))?;
-    Ok(HttpResponse { status, body })
+    Ok(HttpResponse {
+        status,
+        body,
+        final_url,
+    })
 }
 
 #[cfg(test)]
@@ -293,6 +313,31 @@ mod tests {
             let _ = stream.flush();
         });
         (format!("http://127.0.0.1:{port}/"), handle)
+    }
+
+    /// Spawn a loopback origin that replies with each response in
+    /// order, one per connection — enough for a redirect hop.
+    fn serve_sequence(responses: Vec<Vec<u8>>) -> (String, JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let handle = std::thread::spawn(move || {
+            for response in responses {
+                let Ok((mut stream, _)) = listener.accept() else {
+                    return;
+                };
+                let mut received = Vec::new();
+                let mut buf = [0u8; 4096];
+                while !received.windows(4).any(|w| w == b"\r\n\r\n") {
+                    match stream.read(&mut buf) {
+                        Ok(0) | Err(_) => return,
+                        Ok(n) => received.extend_from_slice(&buf[..n]),
+                    }
+                }
+                let _ = stream.write_all(&response);
+                let _ = stream.flush();
+            }
+        });
+        (format!("http://127.0.0.1:{port}/start"), handle)
     }
 
     fn fixed_length_response(body: &[u8]) -> Vec<u8> {
@@ -337,6 +382,36 @@ mod tests {
         let resp = result.unwrap();
         assert!(resp.is_success());
         assert_eq!(resp.body, body);
+    }
+
+    #[test]
+    fn final_url_is_request_url_without_redirect() {
+        let (url, handle) = serve_once(fixed_length_response(b"ok"));
+        let resp = relaxed_client().get(&url, &HashMap::new()).unwrap();
+        handle.join().unwrap();
+        assert_eq!(resp.final_url, url);
+    }
+
+    #[test]
+    fn final_url_is_last_hop_after_redirect() {
+        let redirect =
+            b"HTTP/1.1 302 Found\r\nContent-Length: 0\r\nLocation: /final\r\n\r\n".to_vec();
+        let (url, handle) = serve_sequence(vec![redirect, fixed_length_response(b"ok")]);
+        let resp = relaxed_client().get(&url, &HashMap::new()).unwrap();
+        handle.join().unwrap();
+        assert!(resp.is_success());
+        assert!(resp.final_url.ends_with("/final"));
+        assert_ne!(resp.final_url, url);
+    }
+
+    #[test]
+    fn post_reports_request_url_as_final() {
+        let (url, handle) = serve_once(fixed_length_response(b"ok"));
+        let resp = relaxed_client()
+            .post(&url, &HashMap::new(), b"body")
+            .unwrap();
+        handle.join().unwrap();
+        assert_eq!(resp.final_url, url);
     }
 
     #[test]

@@ -8,6 +8,8 @@ from dataclasses import dataclass
 
 import requests
 
+from ._http import guarded_get
+
 logger = logging.getLogger(__name__)
 
 _MENTION_RE = re.compile(r"(?<!\w)@([a-zA-Z0-9_.-]+)@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})")
@@ -48,11 +50,12 @@ def resolve_actor_url(
     """
     fallback = f"https://{domain}/@{username}"
     try:
-        resp = requests.get(
+        resp = guarded_get(
             f"https://{domain}/.well-known/webfinger",
             params={"resource": f"acct:{username}@{domain}"},
             headers={"Accept": "application/jrd+json"},
             timeout=timeout,
+            session=requests,
         )
         resp.raise_for_status()
         data = resp.json()

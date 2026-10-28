@@ -10,7 +10,7 @@ from requests import ConnectionError, HTTPError
 
 from .crypto import load_private_key, sign_request
 from .handlers._client import get_default_user_agent
-from ._http import is_safe_outbound_url
+from ._http import guarded_get, is_safe_outbound_url
 from .moderation import is_domain_blocked
 from .storage import ActivityPubStorage
 
@@ -132,7 +132,13 @@ def resolve_actor_inbox(
                 )
                 headers = signed
 
-        resp = requests.get(actor_url, headers=headers, timeout=timeout)
+        resp = guarded_get(
+            actor_url,
+            headers=headers,
+            timeout=timeout,
+            allow_private_targets=allow_private_targets,
+            session=requests,
+        )
         resp.raise_for_status()
         actor_data = resp.json()
         storage.cache_remote_actor(actor_url, actor_data)

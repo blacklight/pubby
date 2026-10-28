@@ -52,13 +52,25 @@ def is_safe_outbound_url(url: str) -> bool:
     )
 
 
-def guarded_get(url, *, headers, timeout, allow_private_targets=False, session=None):
+def guarded_get(
+    url, *, headers, timeout, allow_private_targets=False, session=None, **kwargs
+):
     """
     GET *url*, following redirects manually with per-hop
     :func:`is_safe_outbound_url` validation (mirrors the Rust
     ``HttpClient::get``). ``allow_private_targets`` clears only the
     *initial* check when the target is private — a public target still
     gets per-hop validation.
+
+    Extra keyword arguments are forwarded to ``session.get`` (e.g.
+    ``params=``).
+
+    The returned response's ``url`` attribute is the *effective* URL —
+    the last redirect hop, or the request URL when no redirect was
+    followed. Fetchers that verify an object's ``id`` against the
+    origin that served it should compare against ``resp.url``: a
+    server may legitimately redirect a web permalink to its canonical
+    ActivityPub domain.
     """
     import requests  # local import keeps module cheap
 
@@ -70,8 +82,17 @@ def guarded_get(url, *, headers, timeout, allow_private_targets=False, session=N
         raise ActivityPubError(f"refusing unsafe outbound URL: {url}")
     check_hops = not allow_private_targets or safe
     for _hop in range(_MAX_REDIRECTS + 1):
-        resp = sess.get(url, headers=headers, timeout=timeout, allow_redirects=False)
-        if resp.is_redirect or resp.is_permanent_redirect:
+        resp = sess.get(
+            url,
+            headers=headers,
+            timeout=timeout,
+            allow_redirects=False,
+            **kwargs,
+        )
+        # Status-range check (Rust parity) — `is_redirect` misses
+        # 307/308 and fails on non-requests duck-typed responses.
+        code = resp.status_code if isinstance(resp.status_code, int) else 0
+        if 300 <= code < 400:
             loc = resp.headers.get("location")
             if not loc:
                 return resp

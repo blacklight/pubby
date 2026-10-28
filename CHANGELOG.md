@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `http` (Rust): `HttpResponse::final_url` reports the URL the
+  response was actually served from — the last redirect hop for
+  `HttpClient::get`, or the request URL when no redirect was followed.
+  Lets consumers verify a fetched object's `id` against the effective
+  serving origin, covering domain-split servers that redirect web
+  permalinks to their canonical ActivityPub domain.
+
+### Changed
+
+- `client`/`webfinger` (Python): `resolve_actor_inbox` and
+  `resolve_actor_url` fetch through `guarded_get`, giving outbound
+  requests the same per-hop-validated redirect handling as the Rust
+  client; the response `url` attribute is the effective
+  (post-redirect) URL. `guarded_get` detects redirects by status
+  range like the Rust client and forwards extra kwargs (e.g.
+  `params`) to the session.
+
 ## 0.6.2
 
 ### Fixed
