@@ -1,6 +1,6 @@
 [package]
 name = "pubby-sdk"
-version = "0.6.3"
+version = "0.6.4"
 edition = "2021"
 license = "AGPL-3.0-or-later"
 description = "A general-purpose library to add ActivityPub federation support to your web application"
