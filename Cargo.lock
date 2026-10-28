@@ -977,7 +977,7 @@ dependencies = [
 
 [[package]]
 name = "pubby-sdk"
-version = "0.6.4"
+version = "0.6.5"
 dependencies = [
  "axum",
  "base64 0.22.1",
