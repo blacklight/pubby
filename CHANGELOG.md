@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- This is a minor patch release that addresses a format warning that prevented
+  the cargo release.
+
 ## 0.6.4
 
 ### Fixed

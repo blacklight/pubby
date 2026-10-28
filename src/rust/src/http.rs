@@ -459,12 +459,10 @@ mod tests {
         // is recomputed from its own URL or the canonical-domain
         // redirect loops forever.
         let (tx, rx) = std::sync::mpsc::channel();
-        let (b_url, b_handle) =
-            serve_once_report_head(fixed_length_response(b"ok"), tx);
-        let redirect = format!(
-            "HTTP/1.1 302 Found\r\nContent-Length: 0\r\nLocation: {b_url}final\r\n\r\n"
-        )
-        .into_bytes();
+        let (b_url, b_handle) = serve_once_report_head(fixed_length_response(b"ok"), tx);
+        let redirect =
+            format!("HTTP/1.1 302 Found\r\nContent-Length: 0\r\nLocation: {b_url}final\r\n\r\n")
+                .into_bytes();
         let (a_url, a_handle) = serve_once(redirect);
         let mut headers = HashMap::new();
         headers.insert("Host".to_string(), "a.example".to_string());
@@ -477,9 +475,7 @@ mod tests {
         let head = rx.recv().unwrap().to_lowercase();
         // B saw its own authority, not A's stale Host header — and no
         // credential headers crossed origins.
-        let b_authority = b_url
-            .trim_start_matches("http://")
-            .trim_end_matches('/');
+        let b_authority = b_url.trim_start_matches("http://").trim_end_matches('/');
         assert!(head.contains(&format!("host: {b_authority}")), "{head}");
         assert!(!head.contains("signature:"), "{head}");
         assert!(!head.contains("authorization:"), "{head}");
