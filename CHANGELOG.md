@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- Minor LINT/style fixes.
+
 ## 0.6.6
 
 ### Added

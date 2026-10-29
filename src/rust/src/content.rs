@@ -535,12 +535,13 @@ mod bio_tests {
             "{html}"
         );
         assert!(
-            html.contains(
-                r#"<a href="https://manganiello.eu/@fabio">@fabio@manganiello.eu</a>"#
-            ),
+            html.contains(r#"<a href="https://manganiello.eu/@fabio">@fabio@manganiello.eu</a>"#),
             "{html}"
         );
-        assert!(html.contains(r#"<a href="https://e.com">e.com</a>"#), "{html}");
+        assert!(
+            html.contains(r#"<a href="https://e.com">e.com</a>"#),
+            "{html}"
+        );
         // A `#` mid-word and an email are left alone.
         let html = render_bio_html("a#b x@y.zz user@example.com");
         assert!(!html.contains("<a"), "{html}");
