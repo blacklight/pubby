@@ -28,7 +28,9 @@ _HASHTAG_RE = r"(?<![\w&#])#[A-Za-z0-9_]+"
 # Combined token matcher for post content.  The URL alternative comes first
 # so a ``#fragment`` inside a URL is consumed by the URL match instead of
 # being treated as a hashtag.
+_HANDLE_RE = r"(?<![\w&@])@[A-Za-z0-9_][A-Za-z0-9_.-]*@(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}"
 _POST_TOKEN_RE = re.compile(rf"https?://[^\s<>\"']+|{_HASHTAG_RE}")
+_BIO_TOKEN_RE = re.compile(rf"https?://[^\s<>\"']+|{_HASHTAG_RE}|{_HANDLE_RE}")
 
 # Closing brackets that often wrap a URL in prose; stripped only when they
 # are unmatched inside the URL itself.
@@ -134,22 +136,47 @@ def render_bio_html(bio: str) -> str:
     """
     Render profile bio text for an actor ``summary`` field.
 
-    The text is HTML-escaped and any http(s) URLs are turned into anchors so
-    remote servers render them as clickable links.  Newlines become ``<br>``
-    elements so line breaks survive remote HTML rendering.  Matches that
-    fail :func:`is_linkable_url` are left as escaped text.
+    The text is HTML-escaped, http(s) URLs become anchors with scheme-less
+    link text, ``#hashtags`` become ``rel="tag"`` links to ``/tags/{name}``,
+    and ``@user@domain`` handles become links to ``https://{domain}/@{user}``
+    — the same serialization Mastodon emits in ``summary``.  Newlines become
+    ``<br>`` elements so line breaks survive remote HTML rendering.  Matches
+    that fail validation are left as escaped text.
     """
     parts: List[str] = []
     pos = 0
 
-    for match in _URL_RE.finditer(bio):
-        url, trailing = _split_trailing_punctuation(match.group(0))
-        if not is_linkable_url(url):
-            continue
+    for match in _BIO_TOKEN_RE.finditer(bio):
+        token = match.group(0)
         parts.append(_escape_text(bio[pos : match.start()]))
-        parts.append(render_link_anchor(url))
-        parts.append(html.escape(trailing))
         pos = match.end()
+
+        if token.startswith("#"):
+            normalized = _hashtag_name(token[1:])
+            if normalized is None:
+                parts.append(html.escape(token))
+            else:
+                parts.append(
+                    render_link_anchor(f"/tags/{normalized}", rel="tag", label=token)
+                )
+            continue
+
+        if token.startswith("@"):
+            user, _, domain = token[1:].partition("@")
+            if domain:
+                parts.append(
+                    render_link_anchor(f"https://{domain}/@{user}", label=token)
+                )
+            else:
+                parts.append(html.escape(token))
+            continue
+
+        url, trailing = _split_trailing_punctuation(token)
+        if is_linkable_url(url):
+            parts.append(render_link_anchor(url))
+            parts.append(html.escape(trailing))
+        else:
+            parts.append(html.escape(token))
 
     parts.append(_escape_text(bio[pos:]))
     return "".join(parts)

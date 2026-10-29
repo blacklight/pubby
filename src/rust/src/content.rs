@@ -137,25 +137,98 @@ fn escape_text(text: &str) -> String {
     html_escape(&normalized).replace('\n', "<br>")
 }
 
+/// Matches fediverse handles `@user@domain` in free text (the boundary
+/// check equivalent to the hashtag lookbehind is applied separately in
+/// [`handle_start_ok`]).
+static HANDLE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"@[A-Za-z0-9_][A-Za-z0-9_.-]*@(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}").unwrap()
+});
+
+/// Whether `text[..start]` ends with a character that disqualifies a
+/// handle match at `start`.
+fn handle_start_ok(text: &str, start: usize) -> bool {
+    match text[..start].chars().last() {
+        None => true,
+        Some(c) => !(c.is_alphanumeric() || c == '_' || c == '&' || c == '@'),
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum BioToken {
+    Url,
+    Tag,
+    Handle,
+}
+
+/// `(start, end, kind)` spans for bio rendering — URL matches win over
+/// hashtag/handle candidates inside them.
+fn bio_tokens(text: &str) -> Vec<(usize, usize, BioToken)> {
+    let url_matches: Vec<(usize, usize)> = URL_RE
+        .find_iter(text)
+        .map(|m| (m.start(), m.end()))
+        .collect();
+    let in_url = |pos: usize| url_matches.iter().any(|(s, e)| pos >= *s && pos < *e);
+    let mut tokens: Vec<(usize, usize, BioToken)> = url_matches
+        .iter()
+        .map(|(s, e)| (*s, *e, BioToken::Url))
+        .collect();
+    for m in HASHTAG_RE.find_iter(text) {
+        if hashtag_start_ok(text, m.start()) && !in_url(m.start()) {
+            tokens.push((m.start(), m.end(), BioToken::Tag));
+        }
+    }
+    for m in HANDLE_RE.find_iter(text) {
+        if handle_start_ok(text, m.start()) && !in_url(m.start()) {
+            tokens.push((m.start(), m.end(), BioToken::Handle));
+        }
+    }
+    tokens.sort_by_key(|(s, _, _)| *s);
+    tokens
+}
+
 /// Render profile bio text for an actor `summary` field.
 ///
-/// The text is HTML-escaped and any http(s) URLs are turned into anchors
-/// so remote servers render them as clickable links. Newlines become
-/// `<br>` elements. Matches that fail [`is_linkable_url`] are left as
-/// escaped text.
+/// The text is HTML-escaped, http(s) URLs become anchors with scheme-less
+/// link text, `#hashtags` become `rel="tag"` links to `/tags/{name}`, and
+/// `@user@domain` handles become links to `https://{domain}/@{user}` —
+/// the same serialization Mastodon emits in `summary`. Newlines become
+/// `<br>` elements. Matches that fail validation are left as escaped
+/// text.
 pub fn render_bio_html(bio: &str) -> String {
     let mut parts: Vec<String> = Vec::new();
     let mut pos = 0usize;
 
-    for m in URL_RE.find_iter(bio) {
-        let (url, trailing) = split_trailing_punctuation(m.as_str());
-        if !is_linkable_url(&url) {
-            continue;
+    for (start, end, kind) in bio_tokens(bio) {
+        let token = &bio[start..end];
+        parts.push(escape_text(&bio[pos..start]));
+        pos = end;
+        match kind {
+            BioToken::Tag => match hashtag_name(&token[1..]) {
+                Some(name) => parts.push(render_link_anchor(
+                    &format!("/tags/{name}"),
+                    Some("tag"),
+                    Some(token),
+                )),
+                None => parts.push(html_escape(token)),
+            },
+            BioToken::Handle => match token[1..].split_once('@') {
+                Some((user, domain)) => parts.push(render_link_anchor(
+                    &format!("https://{domain}/@{user}"),
+                    None,
+                    Some(token),
+                )),
+                None => parts.push(html_escape(token)),
+            },
+            BioToken::Url => {
+                let (url, trailing) = split_trailing_punctuation(token);
+                if is_linkable_url(&url) {
+                    parts.push(render_link_anchor(&url, None, None));
+                    parts.push(html_escape(&trailing));
+                } else {
+                    parts.push(html_escape(token));
+                }
+            }
         }
-        parts.push(escape_text(&bio[pos..m.start()]));
-        parts.push(render_link_anchor(&url, None, None));
-        parts.push(html_escape(&trailing));
-        pos = m.end();
     }
 
     parts.push(escape_text(&bio[pos..]));
@@ -447,5 +520,29 @@ mod tests {
     fn link_anchor_escapes_rel() {
         let a = render_link_anchor("https://e.com", Some(r#"x"onclick="y"#), None);
         assert!(!a.contains(r#"rel="x"onclick"#), "{a}");
+    }
+}
+
+#[cfg(test)]
+mod bio_tests {
+    use super::render_bio_html;
+
+    #[test]
+    fn bio_renders_hashtags_handles_and_urls() {
+        let html = render_bio_html("see #Yonder or @fabio@manganiello.eu — https://e.com");
+        assert!(
+            html.contains(r#"<a href="/tags/yonder" rel="tag">#Yonder</a>"#),
+            "{html}"
+        );
+        assert!(
+            html.contains(
+                r#"<a href="https://manganiello.eu/@fabio">@fabio@manganiello.eu</a>"#
+            ),
+            "{html}"
+        );
+        assert!(html.contains(r#"<a href="https://e.com">e.com</a>"#), "{html}");
+        // A `#` mid-word and an email are left alone.
+        let html = render_bio_html("a#b x@y.zz user@example.com");
+        assert!(!html.contains("<a"), "{html}");
     }
 }

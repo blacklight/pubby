@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `content` (Rust) / `content` (Python): `render_bio_html` now linkifies
+  `#hashtags` to `/tags/{name}` (`rel="tag"`) and `@user@domain` handles
+  to `https://{domain}/@{user}`, matching Mastodon's `summary`
+  serialization. Bare URLs still become scheme-less anchors and all
+  other text stays HTML-escaped.
+
 ## 0.6.5
 
 ### Fixed
