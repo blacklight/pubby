@@ -834,6 +834,7 @@ handler = ActivityPubHandler(storage=storage, actor_config=config, ...)
 | `name` | `str` | *username* | Display name shown on remote instances |
 | `summary` | `str` | `""` | Actor bio/description (HTML allowed) |
 | `icon_url` | `str` | `""` | Avatar image URL |
+| `image_url` | `str` | `""` | Banner/header image URL (emitted as `image` on the actor document) |
 | `actor_path` | `str` | `"/ap/actor"` | URL path to the actor endpoint |
 | `type` | `str` | `"Person"` | ActivityPub actor type (`Person`, `Application`, `Service`) |
 | `manually_approves_followers` | `bool` | `False` | Advertise `manuallyApprovesFollowers` on the actor document and hold incoming `Follow`s for manual approval (see Follow approval policies) |

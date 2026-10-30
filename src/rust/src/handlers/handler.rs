@@ -146,6 +146,8 @@ pub struct ActivityPubHandler {
     pub actor_summary: String,
     /// Avatar URL.
     pub icon_url: String,
+    /// Banner/header image URL (`image` on the actor document).
+    pub image_url: String,
     /// URL path to the actor endpoint.
     pub actor_path: String,
     /// Actor type (`Person`, `Application`, …).
@@ -215,6 +217,7 @@ impl ActivityPubHandler {
         let actor_name = actor_config.name.clone();
         let actor_summary = actor_config.summary.clone();
         let icon_url = actor_config.icon_url.clone();
+        let image_url = actor_config.image_url.clone();
         let actor_path = actor_config.actor_path.clone();
         let actor_type = actor_config.actor_type.clone();
         let manually_approves = actor_config.manually_approves_followers;
@@ -318,6 +321,7 @@ impl ActivityPubHandler {
             actor_name,
             actor_summary,
             icon_url,
+            image_url,
             actor_path,
             actor_type,
             manually_approves,
@@ -444,6 +448,11 @@ impl ActivityPubHandler {
                 None
             } else {
                 Some(json!({"type": "Image", "url": self.icon_url}))
+            },
+            image: if self.image_url.is_empty() {
+                None
+            } else {
+                Some(json!({"type": "Image", "url": self.image_url}))
             },
             public_key_pem: self.public_key_pem.clone(),
             manually_approves_followers: self.manually_approves,

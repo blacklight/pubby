@@ -154,6 +154,7 @@ class ActivityPubHandler:
         self.actor_name = actor_config.name
         self.actor_summary = actor_config.summary
         self.icon_url = actor_config.icon_url
+        self.image_url = actor_config.image_url
         self.actor_path = actor_config.actor_path
         self.actor_type = actor_config.type
         self.manually_approves = actor_config.manually_approves_followers
@@ -375,6 +376,9 @@ class ActivityPubHandler:
             followers=self.followers_url,
             following=self.following_url,
             icon=({"type": "Image", "url": self.icon_url} if self.icon_url else None),
+            image=(
+                {"type": "Image", "url": self.image_url} if self.image_url else None
+            ),
             public_key_pem=self.public_key_pem,
             manually_approves_followers=self.manually_approves,
             discoverable=True,

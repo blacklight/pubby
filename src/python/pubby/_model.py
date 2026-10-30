@@ -206,6 +206,7 @@ class ActorConfig:
     :param name: Display name shown on remote instances.
     :param summary: Short bio / description (HTML allowed).
     :param icon_url: URL to an avatar image.
+    :param image_url: URL to a banner/header image (``image`` on the actor document).
     :param actor_path: URL path to the actor endpoint (appended to *base_url*).
     :param type: ActivityPub actor type (``Person``, ``Application``, ``Service``, etc.).
     :param manually_approves_followers: If ``True``, follow requests require
@@ -220,6 +221,7 @@ class ActorConfig:
     name: str | None = None
     summary: str = ""
     icon_url: str = ""
+    image_url: str = ""
     actor_path: str = "/ap/actor"
     type: str = "Person"
     manually_approves_followers: bool = False
@@ -248,6 +250,7 @@ class ActorConfig:
             name=d.get("name"),
             summary=d.get("summary", ""),
             icon_url=d.get("icon_url", ""),
+            image_url=d.get("image_url", ""),
             actor_path=d.get("actor_path", "/ap/actor"),
             type=d.get("type", "Person"),
             manually_approves_followers=d.get("manually_approves_followers", False),
@@ -280,6 +283,7 @@ class Actor:
     followers: str = ""
     following: str = ""
     icon: dict | None = None
+    image: dict | None = None
     public_key_pem: str = ""
     manually_approves_followers: bool = False
     discoverable: bool = True
@@ -311,6 +315,8 @@ class Actor:
 
         if self.icon:
             doc["icon"] = self.icon
+        if self.image:
+            doc["image"] = self.image
 
         if self.public_key_pem:
             doc["publicKey"] = {
@@ -346,6 +352,9 @@ class Actor:
         icon = data.get("icon")
         if isinstance(icon, str):
             icon = {"type": "Image", "url": icon}
+        image = data.get("image")
+        if isinstance(image, str):
+            image = {"type": "Image", "url": image}
 
         return cls(
             id=data.get("id", ""),
@@ -358,6 +367,7 @@ class Actor:
             followers=data.get("followers", ""),
             following=data.get("following", ""),
             icon=icon,
+            image=image,
             public_key_pem=public_key_pem,
             manually_approves_followers=data.get("manuallyApprovesFollowers", False),
             discoverable=data.get("discoverable", True),

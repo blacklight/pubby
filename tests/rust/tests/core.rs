@@ -21,6 +21,7 @@ fn make_config() -> ActorConfig {
         "name": "Test Blog",
         "summary": "A test blog",
         "icon_url": "https://blog.example.com/icon.png",
+        "image_url": "https://blog.example.com/banner.png",
     }))
     .unwrap()
 }

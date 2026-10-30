@@ -462,6 +462,8 @@ pub struct ActorConfig {
     pub summary: String,
     /// URL to an avatar image.
     pub icon_url: String,
+    /// URL to a banner/header image (`image` on the actor document).
+    pub image_url: String,
     /// URL path to the actor endpoint (appended to `base_url`).
     pub actor_path: String,
     /// ActivityPub actor type (`Person`, `Application`, `Service`, …).
@@ -501,6 +503,7 @@ impl ActorConfig {
             name: None,
             summary: String::new(),
             icon_url: String::new(),
+            image_url: String::new(),
             actor_path: "/ap/actor".to_string(),
             actor_type: "Person".to_string(),
             manually_approves_followers: false,
@@ -544,6 +547,7 @@ impl ActorConfig {
             name: data.get("name").and_then(|v| v.as_str()).map(String::from),
             summary: get_string(data, "summary"),
             icon_url: get_string(data, "icon_url"),
+            image_url: get_string(data, "image_url"),
             actor_path: get_str(data, "actor_path")
                 .unwrap_or("/ap/actor")
                 .to_string(),
@@ -596,6 +600,8 @@ pub struct Actor {
     pub followers: String,
     pub following: String,
     pub icon: Option<Value>,
+    /// Banner/header image (`image` on the actor document).
+    pub image: Option<Value>,
     pub public_key_pem: String,
     pub manually_approves_followers: bool,
     pub discoverable: bool,
@@ -625,6 +631,7 @@ impl Default for Actor {
             followers: String::new(),
             following: String::new(),
             icon: None,
+            image: None,
             public_key_pem: String::new(),
             manually_approves_followers: false,
             discoverable: true,
@@ -668,6 +675,9 @@ impl Actor {
 
         if let Some(icon) = &self.icon {
             doc["icon"] = icon.clone();
+        }
+        if let Some(image) = &self.image {
+            doc["image"] = image.clone();
         }
         if !self.public_key_pem.is_empty() {
             doc["publicKey"] = json!({
@@ -714,6 +724,11 @@ impl Actor {
             Some(v) if !v.is_null() => Some(v.clone()),
             _ => None,
         };
+        let image = match data.get("image") {
+            Some(Value::String(s)) => Some(json!({"type": "Image", "url": s})),
+            Some(v) if !v.is_null() => Some(v.clone()),
+            _ => None,
+        };
 
         Actor {
             id: get_string(data, "id"),
@@ -726,6 +741,7 @@ impl Actor {
             followers: get_string(data, "followers"),
             following: get_string(data, "following"),
             icon,
+            image,
             public_key_pem,
             manually_approves_followers: get_bool(data, "manuallyApprovesFollowers", false),
             discoverable: get_bool(data, "discoverable", true),

@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Added
+
+- `ActorConfig.image_url` (Rust and Python): banner/header image URL
+  emitted as `image` on the actor document — Mastodon-style profile
+  banners now federate. `Actor.from_json`/`from_dict` also parse
+  inbound `image` values, and the Mastodon-compatible API maps it to
+  `header`/`header_static`.
+
 ### Fixed
 
 - Minor LINT/style fixes.

@@ -59,6 +59,7 @@ def actor_to_account(handler: ActivityPubHandler) -> dict[str, Any]:
             )
 
     avatar = handler.icon_url or ""
+    header = handler.image_url or ""
 
     return {
         "id": _ACCOUNT_LOCAL_ID,
@@ -70,8 +71,8 @@ def actor_to_account(handler: ActivityPubHandler) -> dict[str, Any]:
         "uri": handler.actor_id,
         "avatar": avatar,
         "avatar_static": avatar,
-        "header": "",
-        "header_static": "",
+        "header": header,
+        "header_static": header,
         "locked": handler.manually_approves,
         "created_at": "1970-01-01T00:00:00.000Z",
         "last_status_at": None,
