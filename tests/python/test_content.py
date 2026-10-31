@@ -99,45 +99,69 @@ class TestRenderLinkAnchor:
 
 
 class TestRenderBioHtml:
-    def test_linkifies_urls(self):
+    def bio_html(self, bio, hashtag_url):
+        return render_bio_html(bio, hashtag_url).html
+
+    def test_linkifies_urls(self, hashtag_url):
         bio = "Find me at https://blog.example.com or http://old.example.net/page."
-        assert render_bio_html(bio) == (
+        assert self.bio_html(bio, hashtag_url) == (
             'Find me at <a href="https://blog.example.com">blog.example.com</a> '
             'or <a href="http://old.example.net/page">old.example.net/page</a>.'
         )
 
-    def test_escapes_non_url_text(self):
+    def test_escapes_non_url_text(self, hashtag_url):
         bio = '<b>not bold</b> see https://a.example/?q="x"'
-        assert render_bio_html(bio) == (
+        assert self.bio_html(bio, hashtag_url) == (
             "&lt;b&gt;not bold&lt;/b&gt; see "
             '<a href="https://a.example/?q=">a.example/?q=</a>&quot;x&quot;'
         )
 
-    def test_strips_wrapping_punctuation(self):
-        assert render_bio_html("(see https://example.com/path)") == (
+    def test_strips_wrapping_punctuation(self, hashtag_url):
+        assert self.bio_html("(see https://example.com/path)", hashtag_url) == (
             '(see <a href="https://example.com/path">example.com/path</a>)'
         )
 
-    def test_keeps_balanced_brackets(self):
-        assert render_bio_html("https://example.com/a_(b)") == (
+    def test_keeps_balanced_brackets(self, hashtag_url):
+        assert self.bio_html("https://example.com/a_(b)", hashtag_url) == (
             '<a href="https://example.com/a_(b)">example.com/a_(b)</a>'
         )
 
-    def test_keeps_balanced_brackets_with_trailing_punctuation(self):
-        assert render_bio_html("https://example.com/a_(b).") == (
+    def test_keeps_balanced_brackets_with_trailing_punctuation(self, hashtag_url):
+        assert self.bio_html("https://example.com/a_(b).", hashtag_url) == (
             '<a href="https://example.com/a_(b)">example.com/a_(b)</a>.'
         )
 
-    def test_leaves_invalid_urls_as_text(self):
-        assert render_bio_html("visit https:// now") == "visit https:// now"
-        assert render_bio_html("plain text") == "plain text"
-        assert render_bio_html("") == ""
+    def test_leaves_invalid_urls_as_text(self, hashtag_url):
+        assert self.bio_html("visit https:// now", hashtag_url) == "visit https:// now"
+        assert self.bio_html("plain text", hashtag_url) == "plain text"
+        assert self.bio_html("", hashtag_url) == ""
 
-    def test_newlines_become_br(self):
-        assert render_bio_html("line one\nline two") == "line one<br>line two"
+    def test_newlines_become_br(self, hashtag_url):
+        assert (
+            self.bio_html("line one\nline two", hashtag_url) == "line one<br>line two"
+        )
 
-    def test_normalizes_crlf_and_cr(self):
-        assert render_bio_html("a\r\nb\rc") == "a<br>b<br>c"
+    def test_normalizes_crlf_and_cr(self, hashtag_url):
+        assert self.bio_html("a\r\nb\rc", hashtag_url) == "a<br>b<br>c"
+
+    def test_linkifies_hashtags_and_collects_names(self, hashtag_url):
+        rendered = render_bio_html("see #Yonder or #YONDER", hashtag_url)
+        assert rendered.html == (
+            'see <a href="https://blog.example.com/tags/yonder" rel="tag">'
+            "#Yonder</a> or "
+            '<a href="https://blog.example.com/tags/yonder" rel="tag">'
+            "#YONDER</a>"
+        )
+        # Duplicate mentions of a tag normalize into one `tag` entry.
+        assert rendered.hashtags == ["yonder"]
+
+    def test_linkifies_handles(self, hashtag_url):
+        assert self.bio_html("@fabio@manganiello.eu", hashtag_url) == (
+            '<a href="https://manganiello.eu/@fabio">@fabio@manganiello.eu</a>'
+        )
+
+    def test_leaves_midword_hash_and_email_alone(self, hashtag_url):
+        assert "<a" not in self.bio_html("a#b x@y.zz user@example.com", hashtag_url)
 
 
 class TestRenderPostHtml:

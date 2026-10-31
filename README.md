@@ -466,18 +466,27 @@ set_object_content(obj, "Live set #jazz #fusion", hashtag_url)
 # obj["content"] holds rendered HTML; obj["tag"] now includes #fusion
 ```
 
-For bios that should only linkify URLs, use `render_bio_html` on the `summary`
-field:
+For bios, use `render_bio_html` on the `summary` field. It also linkifies
+`#hashtags` and `@user@domain` handles, and returns the detected hashtag
+names so they can be advertised in the actor's `tag` array (Mastodon
+indexes remote bio hashtags from it):
 
 ```python
-from pubby import ActivityPubHandler, render_bio_html
+from pubby import ActivityPubHandler, build_hashtag_tags, render_bio_html
+
+hashtag_url = lambda name: f"https://example.com/tags/{name}"
+bio = render_bio_html(
+    "Find me at https://example.com/links. Posts about #blogging.",
+    hashtag_url,
+)
 
 handler = ActivityPubHandler(
     storage=storage,
     actor_config={
         "base_url": "https://example.com",
         "username": "blog",
-        "summary": render_bio_html("Find me at https://example.com/links."),
+        "summary": bio.html,
+        "tag": build_hashtag_tags(bio.hashtags, hashtag_url),
     },
     private_key=private_key,
 )
@@ -839,6 +848,7 @@ handler = ActivityPubHandler(storage=storage, actor_config=config, ...)
 | `type` | `str` | `"Person"` | ActivityPub actor type (`Person`, `Application`, `Service`) |
 | `manually_approves_followers` | `bool` | `False` | Advertise `manuallyApprovesFollowers` on the actor document and hold incoming `Follow`s for manual approval (see Follow approval policies) |
 | `attachment` | `list[dict]` | `[]` | Profile metadata fields (see below) |
+| `tag` | `list[dict]` | `[]` | Actor `tag` entries — `Hashtag` dicts for bio hashtags and `Emoji` dicts for custom emojis used in name/summary/fields (Mastodon renders remote-profile emojis and indexes bio hashtags from this array) |
 | `url` | `str \| None` | `None` | Human-readable profile URL used as the actor's `url` |
 | `liked` | `str \| None` | `None` | Liked collection URL advertised as `liked` |
 | `featured` | `str \| None` | `None` | Featured (pinned posts) collection URL advertised as `featured` |
@@ -1712,7 +1722,7 @@ tags = build_hashtag_tags(rc.hashtags, lambda name: f"https://example.com/tags/{
 | Function | Description |
 |---|---|
 | `render_post_html(text, hashtag_url)` | Render a post with URL + hashtag linkification; newlines become `<br>`. |
-| `render_bio_html(bio)` | Render a bio with URL linkification only; newlines become `<br>`. |
+| `render_bio_html(bio, hashtag_url)` | Render a bio with URL, hashtag and `@user@domain` handle linkification; newlines become `<br>`. Returns `RenderedContent` so bio hashtags can join the actor's `tag` array. |
 | `build_hashtag_tags(names, hashtag_url)` | Build `Hashtag` tag dicts from normalized names. |
 | `set_object_content(obj, text, hashtag_url)` | Set `obj['content']` from plain text and merge detected hashtags into `obj['tag']`. |
 | `format_duration(seconds)` | Format seconds as an ISO-8601 duration (`PT[h]H[m]M[s]S`) for media objects. |

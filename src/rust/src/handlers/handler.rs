@@ -156,6 +156,8 @@ pub struct ActivityPubHandler {
     pub manually_approves: bool,
     /// Actor `PropertyValue` attachments.
     pub actor_attachment: Vec<Value>,
+    /// Actor `tag` entries (`Hashtag`, `Emoji`, …).
+    pub actor_tag: Vec<Value>,
     /// Human-readable profile URL.
     pub actor_url: String,
     /// `liked` collection URL from the actor config.
@@ -222,6 +224,7 @@ impl ActivityPubHandler {
         let actor_type = actor_config.actor_type.clone();
         let manually_approves = actor_config.manually_approves_followers;
         let actor_attachment = actor_config.attachment.clone();
+        let actor_tag = actor_config.tag.clone();
         let actor_url = actor_config.url.clone().unwrap_or_else(|| base_url.clone());
         let actor_liked = actor_config.liked.clone();
         let actor_featured = actor_config.featured.clone();
@@ -326,6 +329,7 @@ impl ActivityPubHandler {
             actor_type,
             manually_approves,
             actor_attachment,
+            actor_tag,
             actor_url,
             actor_liked,
             actor_featured,
@@ -462,6 +466,7 @@ impl ActivityPubHandler {
                 .into_iter()
                 .collect(),
             attachment: self.actor_attachment.clone(),
+            tag: self.actor_tag.clone(),
             liked: self.actor_liked.clone(),
             featured: self.actor_featured.clone(),
             moved_to: self.actor_moved_to.clone(),

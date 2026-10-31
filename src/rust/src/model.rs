@@ -472,6 +472,10 @@ pub struct ActorConfig {
     pub manually_approves_followers: bool,
     /// `PropertyValue` attachments (profile fields).
     pub attachment: Vec<Value>,
+    /// Actor `tag` entries (`Hashtag` for bio hashtags, `Emoji` for
+    /// custom emojis used in name/summary/fields). Mastodon renders
+    /// remote-profile emojis and indexes bio hashtags from this array.
+    pub tag: Vec<Value>,
     /// Human-readable profile URL. When set, the actor's `url` field uses
     /// this instead of `base_url`.
     pub url: Option<String>,
@@ -508,6 +512,7 @@ impl ActorConfig {
             actor_type: "Person".to_string(),
             manually_approves_followers: false,
             attachment: Vec::new(),
+            tag: Vec::new(),
             url: None,
             liked: None,
             featured: None,
@@ -554,6 +559,7 @@ impl ActorConfig {
             actor_type: get_str(data, "type").unwrap_or("Person").to_string(),
             manually_approves_followers: get_bool(data, "manually_approves_followers", false),
             attachment: get_vec(data, "attachment"),
+            tag: get_vec(data, "tag"),
             url: data.get("url").and_then(|v| v.as_str()).map(String::from),
             liked: data.get("liked").and_then(|v| v.as_str()).map(String::from),
             featured: data
@@ -608,6 +614,8 @@ pub struct Actor {
     pub url: String,
     pub endpoints: Map<String, Value>,
     pub attachment: Vec<Value>,
+    /// Actor `tag` entries (`Hashtag`, `Emoji`, …).
+    pub tag: Vec<Value>,
     /// `liked` collection URL.
     pub liked: Option<String>,
     /// `featured` collection URL (pinned posts).
@@ -638,6 +646,7 @@ impl Default for Actor {
             url: String::new(),
             endpoints: Map::new(),
             attachment: Vec::new(),
+            tag: Vec::new(),
             liked: None,
             featured: None,
             moved_to: None,
@@ -691,6 +700,9 @@ impl Actor {
         }
         if !self.attachment.is_empty() {
             doc["attachment"] = Value::Array(self.attachment.clone());
+        }
+        if !self.tag.is_empty() {
+            doc["tag"] = Value::Array(self.tag.clone());
         }
         if let Some(l) = &self.liked {
             doc["liked"] = json!(l);
@@ -748,6 +760,7 @@ impl Actor {
             url: get_string(data, "url"),
             endpoints: get_map(data, "endpoints"),
             attachment: get_vec(data, "attachment"),
+            tag: get_vec(data, "tag"),
             liked: get_str(data, "liked").map(String::from),
             featured: get_str(data, "featured").map(String::from),
             moved_to: get_str(data, "movedTo").map(String::from),

@@ -132,18 +132,27 @@ def _escape_text(text: str) -> str:
     return html.escape(normalized).replace("\n", "<br>")
 
 
-def render_bio_html(bio: str) -> str:
+def render_bio_html(bio: str, hashtag_url: Callable[[str], str]) -> RenderedContent:
     """
     Render profile bio text for an actor ``summary`` field.
 
     The text is HTML-escaped, http(s) URLs become anchors with scheme-less
-    link text, ``#hashtags`` become ``rel="tag"`` links to ``/tags/{name}``,
-    and ``@user@domain`` handles become links to ``https://{domain}/@{user}``
-    — the same serialization Mastodon emits in ``summary``.  Newlines become
-    ``<br>`` elements so line breaks survive remote HTML rendering.  Matches
-    that fail validation are left as escaped text.
+    link text, ``#hashtags`` become ``rel="tag"`` links produced by the
+    supplied ``hashtag_url`` callback, and ``@user@domain`` handles become
+    links to ``https://{domain}/@{user}`` — the same serialization Mastodon
+    emits in ``summary``.  Newlines become ``<br>`` elements so line breaks
+    survive remote HTML rendering.  Matches that fail validation are left
+    as escaped text.
+
+    :param hashtag_url: Function that receives a normalized hashtag name
+        and returns its (absolute) local URL.
+    :return: A :class:`RenderedContent` — the ``hashtags`` carry the
+        normalized names so the caller can also emit ``Hashtag`` entries
+        in the actor's ``tag`` array.
     """
     parts: List[str] = []
+    hashtags: List[str] = []
+    seen = set()
     pos = 0
 
     for match in _BIO_TOKEN_RE.finditer(bio):
@@ -157,8 +166,11 @@ def render_bio_html(bio: str) -> str:
                 parts.append(html.escape(token))
             else:
                 parts.append(
-                    render_link_anchor(f"/tags/{normalized}", rel="tag", label=token)
+                    render_link_anchor(hashtag_url(normalized), rel="tag", label=token)
                 )
+                if normalized not in seen:
+                    seen.add(normalized)
+                    hashtags.append(normalized)
             continue
 
         if token.startswith("@"):
@@ -179,7 +191,7 @@ def render_bio_html(bio: str) -> str:
             parts.append(html.escape(token))
 
     parts.append(_escape_text(bio[pos:]))
-    return "".join(parts)
+    return RenderedContent("".join(parts), hashtags)
 
 
 def _hashtag_name(name: str) -> Optional[str]:

@@ -226,6 +226,7 @@ class ActorConfig:
     type: str = "Person"
     manually_approves_followers: bool = False
     attachment: list[dict] = field(default_factory=list)
+    tag: list[dict] = field(default_factory=list)
     url: str | None = None
     liked: str | None = None
     featured: str | None = None
@@ -255,6 +256,7 @@ class ActorConfig:
             type=d.get("type", "Person"),
             manually_approves_followers=d.get("manually_approves_followers", False),
             attachment=d.get("attachment", []),
+            tag=d.get("tag", []),
             url=d.get("url"),
             liked=d.get("liked"),
             featured=d.get("featured"),
@@ -290,6 +292,7 @@ class Actor:
     url: str = ""
     endpoints: dict = field(default_factory=dict)
     attachment: list[dict] = field(default_factory=list)
+    tag: list[dict] = field(default_factory=list)
     liked: str | None = None
     featured: str | None = None
     moved_to: str | None = None
@@ -330,6 +333,8 @@ class Actor:
 
         if self.attachment:
             doc["attachment"] = self.attachment
+        if self.tag:
+            doc["tag"] = self.tag
         if self.liked:
             doc["liked"] = self.liked
         if self.featured:
@@ -374,6 +379,7 @@ class Actor:
             url=data.get("url", ""),
             endpoints=data.get("endpoints", {}),
             attachment=data.get("attachment", []),
+            tag=data.get("tag", []),
             liked=data.get("liked"),
             featured=data.get("featured"),
             moved_to=data.get("movedTo"),

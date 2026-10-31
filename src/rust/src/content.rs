@@ -189,13 +189,22 @@ fn bio_tokens(text: &str) -> Vec<(usize, usize, BioToken)> {
 /// Render profile bio text for an actor `summary` field.
 ///
 /// The text is HTML-escaped, http(s) URLs become anchors with scheme-less
-/// link text, `#hashtags` become `rel="tag"` links to `/tags/{name}`, and
-/// `@user@domain` handles become links to `https://{domain}/@{user}` —
-/// the same serialization Mastodon emits in `summary`. Newlines become
-/// `<br>` elements. Matches that fail validation are left as escaped
-/// text.
-pub fn render_bio_html(bio: &str) -> String {
+/// link text, `#hashtags` become `rel="tag"` links produced by the
+/// supplied `hashtag_url` callback, and `@user@domain` handles become
+/// links to `https://{domain}/@{user}` — the same serialization Mastodon
+/// emits in `summary`. Newlines become `<br>` elements. Matches that
+/// fail validation are left as escaped text.
+///
+/// The returned [`RenderedContent`] carries the normalized hashtag names
+/// so the caller can also emit `Hashtag` entries in the actor's `tag`
+/// array.
+///
+/// :param hashtag_url: Function that receives a normalized hashtag name
+///     and returns its (absolute) local URL.
+pub fn render_bio_html(bio: &str, hashtag_url: impl Fn(&str) -> String) -> RenderedContent {
     let mut parts: Vec<String> = Vec::new();
+    let mut hashtags: Vec<String> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
     let mut pos = 0usize;
 
     for (start, end, kind) in bio_tokens(bio) {
@@ -204,11 +213,16 @@ pub fn render_bio_html(bio: &str) -> String {
         pos = end;
         match kind {
             BioToken::Tag => match hashtag_name(&token[1..]) {
-                Some(name) => parts.push(render_link_anchor(
-                    &format!("/tags/{name}"),
-                    Some("tag"),
-                    Some(token),
-                )),
+                Some(name) => {
+                    parts.push(render_link_anchor(
+                        &hashtag_url(&name),
+                        Some("tag"),
+                        Some(token),
+                    ));
+                    if seen.insert(name.clone()) {
+                        hashtags.push(name);
+                    }
+                }
                 None => parts.push(html_escape(token)),
             },
             BioToken::Handle => match token[1..].split_once('@') {
@@ -232,7 +246,10 @@ pub fn render_bio_html(bio: &str) -> String {
     }
 
     parts.push(escape_text(&bio[pos..]));
-    parts.concat()
+    RenderedContent {
+        html: parts.concat(),
+        hashtags,
+    }
 }
 
 fn hashtag_name(name: &str) -> Option<String> {
@@ -527,23 +544,41 @@ mod tests {
 mod bio_tests {
     use super::render_bio_html;
 
+    fn html(bio: &str) -> String {
+        render_bio_html(bio, |name| format!("https://e.com/tags/{name}")).html
+    }
+
     #[test]
     fn bio_renders_hashtags_handles_and_urls() {
-        let html = render_bio_html("see #Yonder or @fabio@manganiello.eu — https://e.com");
-        assert!(
-            html.contains(r#"<a href="/tags/yonder" rel="tag">#Yonder</a>"#),
-            "{html}"
+        let rendered = render_bio_html(
+            "see #Yonder or @fabio@manganiello.eu — https://e.com #YONDER",
+            |name| format!("https://e.com/tags/{name}"),
         );
         assert!(
-            html.contains(r#"<a href="https://manganiello.eu/@fabio">@fabio@manganiello.eu</a>"#),
-            "{html}"
+            rendered
+                .html
+                .contains(r#"<a href="https://e.com/tags/yonder" rel="tag">#Yonder</a>"#),
+            "{}",
+            rendered.html
         );
         assert!(
-            html.contains(r#"<a href="https://e.com">e.com</a>"#),
-            "{html}"
+            rendered
+                .html
+                .contains(r#"<a href="https://manganiello.eu/@fabio">@fabio@manganiello.eu</a>"#),
+            "{}",
+            rendered.html
         );
+        assert!(
+            rendered
+                .html
+                .contains(r#"<a href="https://e.com">e.com</a>"#),
+            "{}",
+            rendered.html
+        );
+        // Duplicate mentions of a tag normalize into one `tag` entry.
+        assert_eq!(rendered.hashtags, vec!["yonder"]);
         // A `#` mid-word and an email are left alone.
-        let html = render_bio_html("a#b x@y.zz user@example.com");
+        let html = html("a#b x@y.zz user@example.com");
         assert!(!html.contains("<a"), "{html}");
     }
 }

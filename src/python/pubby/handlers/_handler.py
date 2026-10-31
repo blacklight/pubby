@@ -159,6 +159,7 @@ class ActivityPubHandler:
         self.actor_type = actor_config.type
         self.manually_approves = actor_config.manually_approves_followers
         self.actor_attachment = actor_config.attachment
+        self.actor_tag = actor_config.tag
         self.actor_url = actor_config.url or actor_config.base_url
         self.actor_liked = actor_config.liked
         self.actor_featured = actor_config.featured
@@ -385,6 +386,7 @@ class ActivityPubHandler:
             url=self.actor_url,
             endpoints={"sharedInbox": self.shared_inbox_url},
             attachment=self.actor_attachment,
+            tag=self.actor_tag,
             liked=self.actor_liked,
             featured=self.actor_featured,
             moved_to=self.actor_moved_to,

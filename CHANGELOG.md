@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `ActorConfig.tag` / `Actor.tag` (Rust and Python): actor `tag` entries
+  (`Hashtag`, `Emoji`, …) are emitted on the actor document and parsed
+  back by `Actor.from_json`/`build`. Mastodon renders remote-profile
+  custom emojis and indexes bio hashtags from this array.
+
+### Changed
+
+- **Breaking** — `render_bio_html` (Rust and Python): takes a
+  `hashtag_url` callback (same contract as `render_post_html`) and
+  returns `RenderedContent` instead of a bare HTML string. Hashtag
+  anchors in actor `summary` now carry absolute URLs — relative
+  `/tags/{name}` links were silently stripped by Mastodon's remote
+  sanitizer. Callers should emit `summary = render_bio_html(bio,
+  hashtag_url).html` and advertise `tag = build_hashtag_tags(rendered.
+  hashtags, hashtag_url)` on the actor config.
+
 ## 0.6.7
 
 ### Added

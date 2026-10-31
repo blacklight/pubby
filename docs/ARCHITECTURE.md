@@ -133,7 +133,7 @@ and `build()` (← JSON-LD) round-trip methods.
 
 | Class | Purpose |
 |-------|---------|
-| `ActorConfig` | Typed configuration for an ActivityPub actor (base URL, username, bio, type, attachments, …). Accepts a plain `dict` via `from_dict()` for backwards compatibility. |
+| `ActorConfig` | Typed configuration for an ActivityPub actor (base URL, username, bio, type, attachments, `tag` entries, …). Accepts a plain `dict` via `from_dict()` for backwards compatibility. |
 | `Actor` | Full ActivityPub Actor document with public key, endpoints, and `to_dict()` serialization. |
 | `Object` | ActivityPub Object (Note, Article, Image, …). Supports `mediaType`, `contentMap`, `quoteControl`, `interactionPolicy`, and `duration`. `url` accepts `str` or a list of `Link` dicts; `attributedTo` accepts `str` or `list[str]` (federated media shapes such as `Audio`). |
 | `Activity` | ActivityPub Activity wrapper (Create, Follow, Like, …). |
@@ -588,8 +588,13 @@ validated `http`/`https` URLs.
   elements (remote servers render `content`/`summary` as HTML, where a
   literal newline would collapse), and returns a `RenderedContent`
   dataclass with the HTML and a deduplicated list of normalized tag names.
-- **`render_bio_html(bio)`** — escapes bio text and linkifies URLs without
-  hashtag processing; newlines become `<br>` elements as above.
+- **`render_bio_html(bio, hashtag_url)`** — escapes bio text, linkifies
+  URLs, turns `#hashtags` into `rel="tag"` links via the callback, and
+  linkifies `@user@domain` handles; newlines become `<br>` elements as
+  above. Returns a `RenderedContent` — the hashtag names can be emitted
+  as `Hashtag` entries in the actor's `tag` array (`ActorConfig.tag`),
+  which also carries `Emoji` entries so remote servers can render
+  custom emojis in the profile.
 - **`build_hashtag_tags(names, hashtag_url)`** — maps normalized tag names to
   ActivityPub `Hashtag` tag dicts, preserving order and without deduplication.
 - **`set_object_content(obj, text, hashtag_url)`** — renders plain text into

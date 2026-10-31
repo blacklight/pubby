@@ -72,6 +72,36 @@ class TestEndpointPaths:
         assert h.followers_url == f"{BASE}/ap/followers"
         assert h.following_url == f"{BASE}/ap/following"
 
+    def test_actor_document_emits_config_tag(self, tmp_path):
+        cfg = ActorConfig(
+            base_url=BASE,
+            username="blog",
+            tag=[
+                {
+                    "type": "Hashtag",
+                    "name": "#rust",
+                    "href": f"{BASE}/tags/rust",
+                },
+                {
+                    "type": "Emoji",
+                    "name": ":blobcat:",
+                    "icon": {
+                        "type": "Image",
+                        "mediaType": "image/png",
+                        "url": f"{BASE}/emoji/blobcat.png",
+                    },
+                },
+            ],
+        )
+        h = _make_handler(FileActivityPubStorage(data_dir=tmp_path), cfg)
+        doc = h.get_actor_document()
+        assert doc["tag"][0]["type"] == "Hashtag"
+        assert doc["tag"][1]["name"] == ":blobcat:"
+
+    def test_actor_document_omits_empty_tag(self, tmp_path):
+        h = _make_handler(FileActivityPubStorage(data_dir=tmp_path))
+        assert "tag" not in h.get_actor_document()
+
 
 class TestScopedOutbox:
     def test_outbox_only_contains_own_activities(self, tmp_path):

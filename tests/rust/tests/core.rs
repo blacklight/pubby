@@ -447,6 +447,44 @@ fn test_handler_actor_document_and_webfinger() {
 }
 
 #[test]
+fn test_actor_document_emits_config_tag() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut cfg = make_config();
+    cfg.tag = vec![
+        json!({
+            "type": "Hashtag",
+            "name": "#rust",
+            "href": "https://blog.example.com/tags/rust",
+        }),
+        json!({
+            "type": "Emoji",
+            "name": ":blobcat:",
+            "icon": {"type": "Image", "mediaType": "image/png",
+                     "url": "https://blog.example.com/emoji/blobcat.png"},
+        }),
+    ];
+    let storage = Arc::new(FileActivityPubStorage::new(dir.path(), true).unwrap());
+    let (priv_key, _) = generate_rsa_keypair(2048).unwrap();
+    let h = ActivityPubHandler::new(storage, cfg, priv_key, HandlerOptions::default()).unwrap();
+    let doc = h.get_actor_document();
+    let tags = doc["tag"].as_array().unwrap();
+    assert_eq!(tags.len(), 2);
+    assert_eq!(tags[0]["type"], "Hashtag");
+    assert_eq!(tags[1]["name"], ":blobcat:");
+    // Round-trip: a parsed remote actor keeps its `tag` entries.
+    let parsed = Actor::from_json(&doc);
+    assert_eq!(parsed.tag.len(), 2);
+}
+
+#[test]
+fn test_actor_document_omits_empty_tag() {
+    let dir = tempfile::tempdir().unwrap();
+    let handler = make_handler(&dir);
+    let doc = handler.get_actor_document();
+    assert!(doc.get("tag").is_none());
+}
+
+#[test]
 fn test_dispatch_endpoints() {
     let dir = tempfile::tempdir().unwrap();
     let handler = make_handler(&dir);
