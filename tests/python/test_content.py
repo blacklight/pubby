@@ -201,6 +201,26 @@ class TestRenderPostHtml:
         assert 'href="https://example.com#fragment"' in rc.html
         assert rc.hashtags == []
 
+    def test_unicode_hashtag_names(self, hashtag_url):
+        # Mastodon's `Tag::HASHTAG_NAME_PAT`: letters, marks, digits and
+        # `_` in any script, `·`/`・`/ZWNJ/ZWJ mid-tag, `＃` marker.
+        rc = render_post_html(
+            "Ich liebe #Scheinkünstler und #日本語 und #عربية und #हिंदी",
+            hashtag_url,
+        )
+        for tag in ["scheinkünstler", "日本語", "عربية", "हिंदी"]:
+            assert tag in rc.hashtags
+        assert 'rel="tag">#Scheinkünstler</a>' in rc.html
+
+        rc = render_post_html("#a·b #x\u200cy ＃full", hashtag_url)
+        assert rc.hashtags == ["a·b", "x\u200cy", "full"]
+
+        # Names end on a word char (trailing `·` stays out), and a
+        # letterless `#123` doesn't link — same as Mastodon.
+        rc = render_post_html("#tag· next #123", hashtag_url)
+        assert rc.hashtags == ["tag"]
+        assert "#tag</a>· next #123" in rc.html
+
     def test_rendered_content_shape(self, hashtag_url):
         rc = render_post_html("hello", hashtag_url)
         assert isinstance(rc, RenderedContent)

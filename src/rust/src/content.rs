@@ -16,10 +16,22 @@ use serde_json::{json, Value};
 /// text around them.
 static URL_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"https?://[^\s<>"']+"#).unwrap());
 
-/// Matches `#hashtags` in free text (candidate matches — the boundary
-/// check equivalent to Python's `(?<![\w&#])` lookbehind is applied
-/// separately in [`hashtag_start_ok`]).
-static HASHTAG_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"#[A-Za-z0-9_]+").unwrap());
+/// Matches `#hashtags` in free text, Mastodon's grammar
+/// (`Tag::HASHTAG_NAME_PAT` in `tag.rb`): Unicode word chars — letters,
+/// combining marks, numbers, connector punctuation like `_` — with
+/// `·`, `・`, ZWNJ/ZWJ as mid-tag separators, and the fullwidth `＃`
+/// accepted as the marker. Names start and end on a word char:
+/// separators can't lead or trail. Candidate matches only — the
+/// boundary check equivalent to Python's `(?<![\w&#])` lookbehind is
+/// applied separately in [`hashtag_start_ok`], and the "at least one
+/// letter" rule in [`hashtag_name`].
+static HASHTAG_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(concat!(
+        r"[#＃][\p{L}\p{M}\p{N}\p{Pc}]",
+        r"(?:[\p{L}\p{M}\p{N}\p{Pc}·・\u{200C}\u{200D}]*[\p{L}\p{M}\p{N}\p{Pc}])?"
+    ))
+    .unwrap()
+});
 
 /// `xsd:duration` restricted to the dayTime components media objects use
 /// (`PnDTnHnMnS`); year/month/week components are rejected.
@@ -212,7 +224,7 @@ pub fn render_bio_html(bio: &str, hashtag_url: impl Fn(&str) -> String) -> Rende
         parts.push(escape_text(&bio[pos..start]));
         pos = end;
         match kind {
-            BioToken::Tag => match hashtag_name(&token[1..]) {
+            BioToken::Tag => match hashtag_name(hashtag_token_name(token)) {
                 Some(name) => {
                     parts.push(render_link_anchor(
                         &hashtag_url(&name),
@@ -261,12 +273,18 @@ fn hashtag_name(name: &str) -> Option<String> {
     }
 }
 
+/// The `#`/`＃` marker stripped off a hashtag token — `＃` is
+/// multi-byte, so a `[1..]` slice would split it.
+fn hashtag_token_name(token: &str) -> &str {
+    &token[token.chars().next().map_or(0, char::len_utf8)..]
+}
+
 /// Whether `text[..start]` ends with a character that disqualifies a
 /// hashtag match at `start` (equivalent to the `(?<![\w&#])` lookbehind).
 fn hashtag_start_ok(text: &str, start: usize) -> bool {
     match text[..start].chars().last() {
         None => true,
-        Some(c) => !(c.is_alphanumeric() || c == '_' || c == '&' || c == '#'),
+        Some(c) => !(c.is_alphanumeric() || c == '_' || c == '&' || c == '#' || c == '＃'),
     }
 }
 
@@ -318,7 +336,7 @@ pub fn render_post_html(text: &str, hashtag_url: impl Fn(&str) -> String) -> Ren
         pos = end;
 
         if is_hashtag {
-            match hashtag_name(&token[1..]) {
+            match hashtag_name(hashtag_token_name(token)) {
                 Some(normalized) => {
                     parts.push(render_link_anchor(
                         &hashtag_url(&normalized),
@@ -542,7 +560,7 @@ mod tests {
 
 #[cfg(test)]
 mod bio_tests {
-    use super::render_bio_html;
+    use super::{render_bio_html, render_post_html};
 
     fn html(bio: &str) -> String {
         render_bio_html(bio, |name| format!("https://e.com/tags/{name}")).html
@@ -580,5 +598,32 @@ mod bio_tests {
         // A `#` mid-word and an email are left alone.
         let html = html("a#b x@y.zz user@example.com");
         assert!(!html.contains("<a"), "{html}");
+    }
+
+    #[test]
+    fn hashtags_accept_unicode_names() {
+        let rendered = render_post_html(
+            "Ich liebe #Scheinkünstler und #日本語 und #عربية und #हिंदी",
+            |name| format!("https://e.com/tags/{name}"),
+        );
+        for tag in ["scheinkünstler", "日本語", "عربية", "हिंदी"] {
+            assert!(rendered.hashtags.contains(&tag.to_string()), "{tag}");
+        }
+        assert!(rendered
+            .html
+            .contains(r#"rel="tag">#Scheinkünstler</a>"#));
+        // Mastodon's separators — `·`, `・`, ZWNJ/ZWJ — are legal
+        // mid-tag, and `＃` is an accepted marker.
+        let rendered = render_post_html("#a·b #x‌y ＃full", |name| {
+            format!("https://e.com/tags/{name}")
+        });
+        assert_eq!(rendered.hashtags, vec!["a·b", "x‌y", "full"]);
+        // Names start/end on word chars: trailing `·` is left out, and
+        // a letterless `#123` doesn't link — same as Mastodon.
+        let rendered = render_post_html("#tag· next #123", |name| {
+            format!("https://e.com/tags/{name}")
+        });
+        assert_eq!(rendered.hashtags, vec!["tag"]);
+        assert!(rendered.html.contains("#tag</a>· next #123"), "{}", rendered.html);
     }
 }

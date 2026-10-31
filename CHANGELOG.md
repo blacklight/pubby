@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Changed
+
+- `render_post_html` / `render_bio_html` (Rust and Python): hashtag
+  names now follow Mastodon's `Tag::HASHTAG_NAME_PAT` — Unicode
+  letters, combining marks, digits and `_` in any script (umlauts,
+  accents, CJK, Arabic, Indic), `·`/`・`/ZWNJ/ZWJ as mid-tag
+  separators, and the fullwidth `＃` marker. The ASCII-only pattern
+  previously truncated `#Scheinkünstler` at the `ü`. A letter is still
+  required (`#123` stays text) and names start/end on a word char.
+
 ## 0.6.8
 
 ### Added

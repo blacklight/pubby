@@ -21,9 +21,59 @@ from urllib.parse import urlparse
 # text around them.
 _URL_RE = re.compile(r"https?://[^\s<>\"']+")
 
-# Matches ``#hashtags`` in free text.  The lookbehind keeps matches from
-# starting inside words, HTML entities (``&#``) or a run of ``#``s.
-_HASHTAG_RE = r"(?<![\w&#])#[A-Za-z0-9_]+"
+# Matches ``#hashtags`` in free text, Mastodon's grammar
+# (``Tag::HASHTAG_NAME_PAT`` in ``tag.rb``).  Unicode ``\w`` covers
+# letters/digits/``_`` in every script; ``_HASHTAG_MARK`` adds the
+# combining marks (\p{M}) ``re`` can't express — Indic matras, Arabic
+# harakat, decomposed accents — and the separator set adds Mastodon's
+# mid-tag separators (``·``, ``・``, ZWNJ/ZWJ).  A name starts and ends
+# on a word char: separators can't lead or trail.  The lookbehind keeps
+# matches from starting inside words, HTML entities (``&#``) or a run
+# of ``#``/``＃``s.  Mirrors Rust ``HASHTAG_RE``.
+_HASHTAG_MARK = (
+    "\u0300-\u036f"  # combining diacriticals (decomposed accents)
+    "\u0483-\u0489\u0591-\u05c7"  # Cyrillic, Hebrew points
+    "\u0610-\u061a\u064b-\u065f\u0670\u06d6-\u06ed"  # Arabic
+    "\u0711\u0730-\u074a\u07a6-\u07b0\u07eb-\u07f3\u07fd"  # Syriac, Thaana, NKo
+    "\u0816-\u082d\u0859-\u085b\u0890-\u0891\u0898-\u089f\u08ca-\u0902"
+    "\u093a-\u094f\u0951-\u0957\u0962-\u0963"  # Devanagari
+    "\u0981-\u0983\u09bc-\u09cd\u09d7\u09e2-\u09e3\u09fe"  # Bengali
+    "\u0a01-\u0a03\u0a3c\u0a3e-\u0a4d\u0a51\u0a70-\u0a71\u0a75"  # Gurmukhi
+    "\u0a81-\u0a83\u0abc-\u0acd\u0ae2-\u0ae3\u0afa-\u0aff"  # Gujarati
+    "\u0b01-\u0b03\u0b3c\u0b3e-\u0b4d\u0b55-\u0b57\u0b62-\u0b63"  # Oriya
+    "\u0b82\u0bbe-\u0bcd\u0bd7"  # Tamil
+    "\u0c00-\u0c04\u0c3c\u0c3e-\u0c4d\u0c55-\u0c56\u0c62-\u0c63"  # Telugu
+    "\u0c81-\u0c83\u0cbc\u0cbe-\u0ccd\u0cd5-\u0cd6\u0ce2-\u0ce3"  # Kannada
+    "\u0d00-\u0d03\u0d3b-\u0d3c\u0d3e-\u0d4d\u0d57\u0d62-\u0d63"  # Malayalam
+    "\u0d81-\u0d83\u0dca\u0dcf-\u0dd4\u0dd6\u0dd8-\u0ddf\u0df2-\u0df3"  # Sinhala
+    "\u0e31-\u0e3a\u0e47-\u0e4e"  # Thai
+    "\u0eb1-\u0ebc\u0ec8-\u0ece"  # Lao
+    "\u0f18-\u0f19\u0f35\u0f37\u0f39\u0f3e-\u0f84\u0f86-\u0f87\u0f8d-\u0fbc\u0fc6"  # Tibetan
+    "\u102b-\u103e\u1056-\u106d\u1071-\u1074\u1082-\u108d\u108f\u109a-\u109d"  # Myanmar
+    "\u135d-\u135f"  # Ethiopic
+    "\u1712-\u1715\u1732-\u1734\u1752-\u1753\u1772-\u1773"  # Philippine
+    "\u17b4-\u17d3\u17dd"  # Khmer
+    "\u180b-\u180d\u180f\u1885-\u1886\u18a9"  # Mongolian
+    "\u1920-\u192b\u1930-\u193b\u1a17-\u1a1b\u1a55-\u1a5e\u1a60-\u1a7c\u1a7f"
+    "\u1ab0-\u1ace"  # combining diacritical marks extended
+    "\u1b00-\u1b04\u1b34-\u1b44\u1b6b-\u1b73"  # Balinese
+    "\u1b80-\u1b82\u1ba1-\u1bad\u1be6-\u1bf3\u1c24-\u1c37"  # Sundanese, Batak, Lepcha
+    "\u1cd0-\u1ce8\u1ced\u1cf2-\u1cf4\u1cf7-\u1cf9"  # Vedic
+    "\u1dc0-\u1dff\u20d0-\u20f0"  # combining marks supplements
+    "\u2cef-\u2cf1\u2d7f\u2de0-\u2dff\u302a-\u302f"  # CJK, Cyrillic ext
+    "\u3099-\u309a"  # Japanese dakuten/handakuten
+    "\ua66f-\ua672\ua674-\ua67d\ua69e-\ua69f\ua6f0-\ua6f1"
+    "\ua802\ua806\ua80b\ua823-\ua827\ua82c\ua880-\ua881\ua8b4-\ua8c5\ua8e0-\ua8f1\ua8ff"
+    "\ua926-\ua92d\ua947-\ua953\ua980-\ua983\ua9b3-\ua9c0\ua9e5"
+    "\uaa29-\uaa36\uaa43\uaa4c-\uaa4d\uaa7b-\uaa7d\uaab0\uaab2-\uaab4\uaab7-\uaab8\uaabe-\uaabf\uaac1"
+    "\uaaeb-\uaaef\uaaf5-\uaaf6\uabe3-\uabea\uabec-\uabed\ufb1e"
+    "\ufe00-\ufe0f\ufe20-\ufe2f"  # variation selectors, combining half marks
+)
+_HASHTAG_WORD = rf"[\w{_HASHTAG_MARK}]"
+_HASHTAG_RE = (
+    rf"(?<![\w&#＃])[#＃]{_HASHTAG_WORD}"
+    rf"(?:[\w{_HASHTAG_MARK}\u00b7\u30fb\u200c\u200d]*{_HASHTAG_WORD})?"
+)
 
 # Combined token matcher for post content.  The URL alternative comes first
 # so a ``#fragment`` inside a URL is consumed by the URL match instead of
@@ -160,7 +210,7 @@ def render_bio_html(bio: str, hashtag_url: Callable[[str], str]) -> RenderedCont
         parts.append(_escape_text(bio[pos : match.start()]))
         pos = match.end()
 
-        if token.startswith("#"):
+        if token.startswith(("#", "＃")):
             normalized = _hashtag_name(token[1:])
             if normalized is None:
                 parts.append(html.escape(token))
@@ -227,7 +277,7 @@ def render_post_html(text: str, hashtag_url: Callable[[str], str]) -> RenderedCo
         parts.append(_escape_text(text[pos : match.start()]))
         pos = match.end()
 
-        if token.startswith("#"):
+        if token.startswith(("#", "＃")):
             normalized = _hashtag_name(token[1:])
             if normalized is None:
                 parts.append(html.escape(token))
