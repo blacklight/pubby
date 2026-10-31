@@ -609,9 +609,7 @@ mod bio_tests {
         for tag in ["scheinkünstler", "日本語", "عربية", "हिंदी"] {
             assert!(rendered.hashtags.contains(&tag.to_string()), "{tag}");
         }
-        assert!(rendered
-            .html
-            .contains(r#"rel="tag">#Scheinkünstler</a>"#));
+        assert!(rendered.html.contains(r#"rel="tag">#Scheinkünstler</a>"#));
         // Mastodon's separators — `·`, `・`, ZWNJ/ZWJ — are legal
         // mid-tag, and `＃` is an accepted marker.
         let rendered = render_post_html("#a·b #x‌y ＃full", |name| {
@@ -624,6 +622,10 @@ mod bio_tests {
             format!("https://e.com/tags/{name}")
         });
         assert_eq!(rendered.hashtags, vec!["tag"]);
-        assert!(rendered.html.contains("#tag</a>· next #123"), "{}", rendered.html);
+        assert!(
+            rendered.html.contains("#tag</a>· next #123"),
+            "{}",
+            rendered.html
+        );
     }
 }
