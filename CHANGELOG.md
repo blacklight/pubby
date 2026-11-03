@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `HttpResponse.headers` + `HttpResponse.header(name)` (Rust): response
+  headers are now collected into a lowercased `HashMap` with
+  comma-joined duplicate fields, exposing `Link` pagination and
+  `Retry-After`/rate-limit signals to consumers. Mirrors the Python
+  side, where `requests.Response.headers` was already available.
+
 ## 0.6.9
 
 ### Changed

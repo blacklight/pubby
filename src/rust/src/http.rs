@@ -33,6 +33,11 @@ pub const MAX_REDIRECTS: u32 = 5;
 pub struct HttpResponse {
     /// HTTP status code.
     pub status: u16,
+    /// Response headers, lowercased by name; duplicate fields are
+    /// joined per RFC 9110 §5.2 (comma-separated). Consumers of
+    /// `Link` pagination or `Retry-After`/rate-limit headers need
+    /// these — mirrors `requests.Response.headers` on the Python side.
+    pub headers: HashMap<String, String>,
     /// Response body bytes.
     pub body: Vec<u8>,
     /// The URL this response was actually served from — the last
@@ -61,6 +66,11 @@ impl HttpResponse {
     /// The body as UTF-8 text.
     pub fn text(&self) -> String {
         String::from_utf8_lossy(&self.body).to_string()
+    }
+
+    /// A response header by name (case-insensitive).
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.headers.get(&name.to_ascii_lowercase()).map(String::as_str)
     }
 }
 
@@ -291,6 +301,19 @@ fn read_response(
     final_url: String,
 ) -> Result<HttpResponse> {
     let status = resp.status().as_u16();
+    let mut headers: HashMap<String, String> = HashMap::new();
+    for (name, value) in resp.headers() {
+        if let Ok(v) = value.to_str() {
+            let key = name.as_str().to_ascii_lowercase();
+            headers
+                .entry(key)
+                .and_modify(|e| {
+                    e.push_str(", ");
+                    e.push_str(v);
+                })
+                .or_insert_with(|| v.to_string());
+        }
+    }
     let mut resp = resp;
     let body = resp
         .body_mut()
@@ -300,6 +323,7 @@ fn read_response(
         .map_err(|e| ActivityPubError::General(format!("failed to read response body: {e}")))?;
     Ok(HttpResponse {
         status,
+        headers,
         body,
         final_url,
     })
@@ -420,6 +444,22 @@ mod tests {
     fn get(client: &HttpClient, response: Vec<u8>) -> (Result<HttpResponse>, JoinHandle<()>) {
         let (url, handle) = serve_once(response);
         (client.get(&url, &HashMap::new()), handle)
+    }
+
+    #[test]
+    fn response_headers_are_collected() {
+        let mut raw = b"HTTP/1.1 200 OK\r\n".to_vec();
+        raw.extend_from_slice(b"Content-Type: application/json\r\n");
+        raw.extend_from_slice(b"Link: <https://x/next>; rel=\"next\"\r\n");
+        raw.extend_from_slice(b"Retry-After: 30\r\n");
+        raw.extend_from_slice(b"Content-Length: 4\r\n\r\nbody");
+        let (result, handle) = get(&relaxed_client(), raw);
+        handle.join().unwrap();
+        let resp = result.unwrap();
+        assert_eq!(resp.header("retry-after"), Some("30"));
+        assert!(resp.header("link").unwrap().contains("rel=\"next\""));
+        assert_eq!(resp.header("LINK"), Some(resp.header("link").unwrap()));
+        assert!(resp.header("missing").is_none());
     }
 
     #[test]
