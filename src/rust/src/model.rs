@@ -798,6 +798,15 @@ pub struct Object {
     pub quote_policy: Option<String>,
     pub interaction_policy: Option<Value>,
     pub duration: Option<String>,
+    /// Collection URL string or `Collection`/`OrderedCollection`
+    /// reference advertised as the object's `replies`.
+    pub replies: Option<Value>,
+    /// Same as `replies`, for `likes`.
+    pub likes: Option<Value>,
+    /// Same as `replies`, for `shares`.
+    pub shares: Option<Value>,
+    /// Same as `replies`, for `quotes`.
+    pub quotes: Option<Value>,
 }
 
 impl Default for Object {
@@ -824,6 +833,10 @@ impl Default for Object {
             quote_policy: None,
             interaction_policy: None,
             duration: None,
+            replies: None,
+            likes: None,
+            shares: None,
+            quotes: None,
         }
     }
 }
@@ -898,6 +911,18 @@ impl Object {
         if let Some(d) = &self.duration {
             doc["duration"] = json!(d);
         }
+        if let Some(v) = &self.replies {
+            doc["replies"] = v.clone();
+        }
+        if let Some(v) = &self.likes {
+            doc["likes"] = v.clone();
+        }
+        if let Some(v) = &self.shares {
+            doc["shares"] = v.clone();
+        }
+        if let Some(v) = &self.quotes {
+            doc["quotes"] = v.clone();
+        }
         doc
     }
 
@@ -937,6 +962,10 @@ impl Object {
             quote_policy: get_string_coerced_opt(data, "quotePolicy"),
             interaction_policy: data.get("interactionPolicy").cloned(),
             duration: get_string_coerced_opt(data, "duration"),
+            replies: data.get("replies").cloned(),
+            likes: data.get("likes").cloned(),
+            shares: data.get("shares").cloned(),
+            quotes: data.get("quotes").cloned(),
         }
     }
 }

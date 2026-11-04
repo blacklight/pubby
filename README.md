@@ -1232,7 +1232,26 @@ obj = Object(
 
 Key fields: `id`, `type`, `name`, `content`, `url`, `attributed_to`,
 `published`, `updated`, `summary`, `to`, `cc`, `tag`, `media_type`,
-`quote_control`, `quote_policy`, `interaction_policy`, `duration`.
+`quote_control`, `quote_policy`, `interaction_policy`, `duration`,
+`replies`, `likes`, `shares`, `quotes`.
+
+`replies`, `likes`, `shares` and `quotes` are emitted verbatim — set
+them to a collection URL string or a `Collection`/`OrderedCollection`
+reference so remote servers can discover the object's interactions:
+
+```python
+post = Object(
+    id="https://example.com/posts/1",
+    replies={
+        "id": "https://example.com/posts/1/replies",
+        "type": "OrderedCollection",
+        "totalItems": 12,
+        "first": "https://example.com/posts/1/replies?page=1",
+    },
+    likes={"id": "https://example.com/posts/1/likes", "totalItems": 34},
+    shares={"id": "https://example.com/posts/1/shares", "totalItems": 7},
+)
+```
 
 `url` also accepts a list of `Link` dicts, and `attributed_to` a list of
 actor URLs — the shapes used by federated media objects such as `Audio`:

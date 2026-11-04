@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `Object` now accepts `replies`, `likes`, `shares` and `quotes` fields
+  (collection URL string or `Collection`/`OrderedCollection` reference),
+  emitted verbatim in `to_dict()` and round-tripped through `build()`.
+  These let applications advertise an object's interaction collections
+  so remote servers can discover replies/likes/boosts/quotes.
+
 ## 0.6.10
 
 ### Added

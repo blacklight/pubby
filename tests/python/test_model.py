@@ -273,6 +273,38 @@ class TestObject:
         assert "duration" not in obj.to_dict()
         assert Object.build(obj.to_dict()).duration is None
 
+    def test_interaction_collections_roundtrip(self):
+        replies = {
+            "id": "https://example.com/o/1/replies",
+            "type": "OrderedCollection",
+            "totalItems": 3,
+            "first": "https://example.com/o/1/replies?page=1",
+        }
+        obj = Object(
+            id="https://example.com/o/1",
+            replies=replies,
+            likes={"id": "https://example.com/o/1/likes", "totalItems": 5},
+            shares="https://example.com/o/1/shares",
+            quotes=None,
+        )
+        doc = obj.to_dict()
+        assert doc["replies"] == replies
+        assert doc["likes"] == {"id": "https://example.com/o/1/likes", "totalItems": 5}
+        assert doc["shares"] == "https://example.com/o/1/shares"
+        assert "quotes" not in doc
+
+        rebuilt = Object.build(doc)
+        assert rebuilt.replies == replies
+        assert rebuilt.likes == {"id": "https://example.com/o/1/likes", "totalItems": 5}
+        assert rebuilt.shares == "https://example.com/o/1/shares"
+        assert rebuilt.quotes is None
+
+    def test_interaction_collections_omitted_when_none(self):
+        obj = Object(id="x")
+        doc = obj.to_dict()
+        for key in ("replies", "likes", "shares", "quotes"):
+            assert key not in doc
+
     def test_audio_object_roundtrip(self):
         obj = Object(
             id="https://example.com/tracks/1",

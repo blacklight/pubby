@@ -83,6 +83,32 @@ fn test_object_roundtrip() {
 }
 
 #[test]
+fn test_object_interaction_collections_roundtrip() {
+    let mut obj = Object::new("https://e.com/o/1");
+    let replies = json!({
+        "id": "https://e.com/o/1/replies",
+        "type": "OrderedCollection",
+        "totalItems": 3,
+        "first": "https://e.com/o/1/replies?page=1",
+    });
+    obj.replies = Some(replies.clone());
+    obj.likes = Some(json!({"id": "https://e.com/o/1/likes", "totalItems": 5}));
+    obj.shares = Some(json!("https://e.com/o/1/shares"));
+
+    let doc = obj.to_json();
+    assert_eq!(doc["replies"], replies);
+    assert_eq!(doc["likes"]["totalItems"], 5);
+    assert_eq!(doc["shares"], "https://e.com/o/1/shares");
+    assert!(doc.get("quotes").is_none());
+
+    let back = Object::from_json(&doc);
+    assert_eq!(back.replies, Some(replies));
+    assert_eq!(back.likes.unwrap()["totalItems"], 5);
+    assert_eq!(back.shares.unwrap(), "https://e.com/o/1/shares");
+    assert!(back.quotes.is_none());
+}
+
+#[test]
 fn test_signature_roundtrip() {
     let (priv_key, pub_key) = generate_rsa_keypair(2048).unwrap();
     let body = b"{\"hello\":\"world\"}";

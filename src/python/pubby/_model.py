@@ -397,6 +397,12 @@ class Object:
     link). ``attributed_to`` accepts a single actor URL or a list of actor
     URLs. ``duration`` is emitted verbatim and should be an ISO-8601
     duration string (see ``pubby.content.format_duration``).
+
+    ``replies``, ``likes``, ``shares`` and ``quotes`` are emitted verbatim
+    — set them to a collection URL string or a ``Collection``/
+    ``OrderedCollection`` reference (e.g. ``{"id": ..., "type":
+    "OrderedCollection", "totalItems": n, "first": ...}``) so remote
+    servers can discover this object's interactions.
     """
 
     id: str
@@ -420,6 +426,10 @@ class Object:
     quote_policy: str | None = None
     interaction_policy: dict | None = None
     duration: str | None = None
+    replies: dict | str | None = None
+    likes: dict | str | None = None
+    shares: dict | str | None = None
+    quotes: dict | str | None = None
 
     def to_dict(self) -> dict:
         """Return the ActivityPub JSON-LD representation."""
@@ -465,6 +475,14 @@ class Object:
             doc["interactionPolicy"] = self.interaction_policy
         if self.duration:
             doc["duration"] = self.duration
+        if self.replies is not None:
+            doc["replies"] = self.replies
+        if self.likes is not None:
+            doc["likes"] = self.likes
+        if self.shares is not None:
+            doc["shares"] = self.shares
+        if self.quotes is not None:
+            doc["quotes"] = self.quotes
 
         return doc
 
@@ -504,6 +522,10 @@ class Object:
             quote_policy=data.get("quotePolicy"),
             interaction_policy=data.get("interactionPolicy"),
             duration=data.get("duration"),
+            replies=data.get("replies"),
+            likes=data.get("likes"),
+            shares=data.get("shares"),
+            quotes=data.get("quotes"),
         )
 
 
