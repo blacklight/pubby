@@ -1629,6 +1629,90 @@ fn test_multi_webfinger_url_resources() {
 }
 
 #[test]
+fn test_dispatch_multi_actor_case_variant() {
+    use pubby_sdk::server::dispatch_multi;
+    let dir = tempfile::tempdir().unwrap();
+    let instance = make_handler(&dir);
+    let bob_storage = Arc::new(FileActivityPubStorage::new(dir.path(), true).unwrap());
+    let (bob_key, _) = generate_rsa_keypair(2048).unwrap();
+    let bob_cfg = ActorConfig::from_json(&json!({
+        "base_url": "https://blog.example.com",
+        "username": "bob",
+        "actor_path": "/ap/users/bob",
+        "inbox_path": "/ap/users/bob/inbox",
+        "outbox_path": "/ap/users/bob/outbox",
+        "followers_path": "/ap/users/bob/followers",
+        "following_path": "/ap/users/bob/following",
+    }))
+    .unwrap();
+    let bob = Arc::new(
+        ActivityPubHandler::new(bob_storage, bob_cfg, bob_key, HandlerOptions::default()).unwrap(),
+    );
+    let bob_c = bob.clone();
+    let multi = MultiActorHandler::new(
+        instance,
+        Arc::new(move |u: &str| {
+            Ok(if u.eq_ignore_ascii_case("bob") {
+                Some(bob_c.clone())
+            } else {
+                None
+            })
+        }),
+        "/ap/users/{username}",
+    );
+    let opts = DispatchOptions::default();
+    let req = |path: &str| DispatchRequest {
+        method: "GET".into(),
+        path: path.into(),
+        query: HashMap::new(),
+        headers: HashMap::new(),
+        body: vec![],
+        remote_addr: "1.2.3.4".into(),
+        request_target: None,
+    };
+    let body = |resp: &pubby_sdk::server::HttpResp| -> Value {
+        serde_json::from_slice(&resp.body).unwrap()
+    };
+
+    // Canonical casing serves the actor document untouched.
+    let resp = dispatch_multi(&multi, &req("/ap/users/bob"), "/ap", &opts);
+    assert_eq!(resp.status, 200);
+    let doc = body(&resp);
+    assert_eq!(doc["id"], "https://blog.example.com/ap/users/bob");
+    assert!(doc.get("movedTo").is_none());
+
+    // A case-variant request resolves the same actor but must get a
+    // document whose `id` matches the requested URI, marked movedTo
+    // the canonical actor so remotes migrate the stale record.
+    let resp = dispatch_multi(&multi, &req("/ap/users/Bob"), "/ap", &opts);
+    assert_eq!(resp.status, 200);
+    let doc = body(&resp);
+    assert_eq!(doc["id"], "https://blog.example.com/ap/users/Bob");
+    assert_eq!(
+        doc["movedTo"],
+        json!("https://blog.example.com/ap/users/bob")
+    );
+    assert_eq!(
+        doc["outbox"],
+        json!("https://blog.example.com/ap/users/Bob/outbox")
+    );
+    assert_eq!(
+        doc["followers"],
+        json!("https://blog.example.com/ap/users/Bob/followers")
+    );
+    assert_eq!(
+        doc["publicKey"]["id"],
+        json!("https://blog.example.com/ap/users/Bob#main-key")
+    );
+    assert_eq!(
+        doc["publicKey"]["owner"],
+        json!("https://blog.example.com/ap/users/Bob")
+    );
+    // Non-actor-id URLs (the human profile) stay canonical.
+    assert_eq!(doc["preferredUsername"], json!("bob"));
+}
+
+#[test]
 fn test_inbox_options_with_options() {
     use pubby_sdk::handlers::{InboxOptions, InboxProcessor};
     use std::time::Duration;

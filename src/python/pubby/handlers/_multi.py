@@ -19,6 +19,27 @@ logger = logging.getLogger(__name__)
 ActorResolver = Callable[[str], Optional[ActivityPubHandler]]
 
 
+def _rewrite_actor_id(value, canonical_id: str, variant_id: str):
+    """
+    Recursively rewrite self-references to *canonical_id* as *variant_id*.
+
+    Strings are only rewritten when *canonical_id* is followed by a URL
+    boundary (end, ``/``, ``#``, ``?``) so sibling ids sharing the
+    prefix are safe. Returns the rewritten value.
+    """
+    if isinstance(value, dict):
+        return {
+            k: _rewrite_actor_id(v, canonical_id, variant_id) for k, v in value.items()
+        }
+    if isinstance(value, list):
+        return [_rewrite_actor_id(v, canonical_id, variant_id) for v in value]
+    if isinstance(value, str) and value.startswith(canonical_id):
+        rest = value[len(canonical_id) :]
+        if not rest or rest[0] in "/#?":
+            return f"{variant_id}{rest}"
+    return value
+
+
 class MultiActorHandler:
     """
     Registry of local actors for multi-actor deployments.
@@ -82,6 +103,27 @@ class MultiActorHandler:
     def for_username(self, username: str) -> Optional[ActivityPubHandler]:
         """Resolve the handler for *username* (``None`` when unknown)."""
         return self.resolver(username)
+
+    def actor_document(self, username: str) -> Optional[dict]:
+        """
+        Actor document for *username* as requested.
+
+        When *username*'s casing differs from the actor's canonical one
+        (e.g. after a case-only rename), the document is served under
+        the requested actor id — every self-reference rewritten — with
+        ``movedTo`` pointing at the canonical actor, so remotes keying
+        accounts on the document ``id`` migrate the stale record
+        instead of rejecting it as a mismatched id. Returns ``None``
+        for unknown usernames.
+        """
+        handler = self.for_username(username)
+        if handler is None:
+            return None
+        doc = handler.get_actor_document()
+        if username != handler.username:
+            doc = _rewrite_actor_id(doc, handler.actor_id, self.actor_url(username))
+            doc["movedTo"] = handler.actor_id
+        return doc
 
     def for_addressees(self, activity_data: dict) -> ActivityPubHandler:
         """

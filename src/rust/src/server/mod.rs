@@ -584,8 +584,11 @@ pub fn dispatch_multi(
             ("GET", "") => {
                 gate!(&h);
                 let key = cache::actor_document_key_for(&username);
+                // `actor_document` serves case-variant requests under
+                // the requested actor id with `movedTo` set — see
+                // `MultiActorHandler::actor_document`.
                 return serve_document(&h, options, request, &key, ACTIVITY_JSON, || {
-                    Some(h.get_actor_document())
+                    multi.actor_document(&username).ok().flatten()
                 });
             }
             ("GET", "/outbox") => {

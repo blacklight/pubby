@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- `dispatch_multi` (Rust): a per-actor GET requested with a username
+  casing different from the actor's canonical one (e.g. after a
+  case-only rename) now serves the actor document under the requested
+  actor id — every self-reference rewritten — with `movedTo` pointing
+  at the canonical actor. Previously the document kept the canonical
+  `id`, which remote servers reject as a mismatched id, leaving stale
+  pre-rename actor records frozen forever.
+- `MultiActorHandler.actor_document(username)` (Rust and Python): new
+  method returning the actor document for a requested username. When
+  the casing differs from the actor's canonical one (e.g. after a
+  case-only rename), the document is served under the requested actor
+  id — every self-reference rewritten — with `movedTo` pointing at the
+  canonical actor, so remotes migrate the stale record instead of
+  rejecting it as a mismatched id. `dispatch_multi` now routes its
+  per-actor GET through it; Python applications serving per-user actor
+  documents should do the same (the bundled adapters only serve the
+  instance actor).
+
 ## 0.6.11
 
 ### Added

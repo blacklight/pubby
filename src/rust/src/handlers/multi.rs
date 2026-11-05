@@ -10,7 +10,7 @@
 
 use std::sync::Arc;
 
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::error::Result;
 use crate::model::str_list;
@@ -22,6 +22,34 @@ use super::ActivityPubHandler;
 /// The host decides caching/LRU; construct one [`ActivityPubHandler`]
 /// per local account.
 pub type ActorResolver = Arc<dyn Fn(&str) -> Result<Option<Arc<ActivityPubHandler>>> + Send + Sync>;
+
+/// Rewrite an actor document served under a case-variant actor id:
+/// every self-reference to `canonical_id` becomes `variant_id` and
+/// `movedTo` points remotes at the canonical actor. String values are
+/// only rewritten when `canonical_id` is followed by a URL boundary
+/// (end, `/`, `#`, `?`) so sibling ids sharing the prefix are safe.
+fn actor_id_variant(doc: &mut Value, canonical_id: &str, variant_id: &str) {
+    fn rewrite(value: &mut Value, from: &str, to: &str) {
+        match value {
+            Value::String(s) => {
+                if let Some(rest) = s.strip_prefix(from) {
+                    if rest.is_empty()
+                        || rest.starts_with('/')
+                        || rest.starts_with('#')
+                        || rest.starts_with('?')
+                    {
+                        *s = format!("{to}{rest}");
+                    }
+                }
+            }
+            Value::Array(items) => items.iter_mut().for_each(|i| rewrite(i, from, to)),
+            Value::Object(map) => map.values_mut().for_each(|i| rewrite(i, from, to)),
+            _ => {}
+        }
+    }
+    rewrite(doc, canonical_id, variant_id);
+    doc["movedTo"] = json!(canonical_id);
+}
 
 /// Registry of local actors for multi-actor deployments.
 pub struct MultiActorHandler {
@@ -103,6 +131,26 @@ impl MultiActorHandler {
     /// Resolve the handler for `username`.
     pub fn for_username(&self, username: &str) -> Result<Option<Arc<ActivityPubHandler>>> {
         (self.resolver)(username)
+    }
+
+    /// Actor document for `username` as requested.
+    ///
+    /// When `username`'s casing differs from the actor's canonical one
+    /// (e.g. after a case-only rename), the document is served under
+    /// the requested actor id — every self-reference rewritten — with
+    /// `movedTo` pointing at the canonical actor, so remotes keying
+    /// accounts on the document `id` migrate the stale record instead
+    /// of rejecting it as a mismatched id. `Ok(None)` for unknown
+    /// usernames.
+    pub fn actor_document(&self, username: &str) -> Result<Option<Value>> {
+        let Some(handler) = self.for_username(username)? else {
+            return Ok(None);
+        };
+        let mut doc = handler.get_actor_document();
+        if username != handler.username {
+            actor_id_variant(&mut doc, &handler.actor_id, &self.actor_url(username));
+        }
+        Ok(Some(doc))
     }
 
     /// Resolve the local handler an inbound activity addresses: scans

@@ -198,3 +198,43 @@ class TestWebFingerUrlResources:
             is None
         )
         assert multi.get_webfinger_response(f"{BASE}/ap/users/bob/outbox") is None
+
+    def test_actor_document_case_variant(self, tmp_path):
+        storage = FileActivityPubStorage(data_dir=tmp_path)
+        instance = _make_handler(storage)
+        bob = _make_handler(
+            storage,
+            {
+                "base_url": BASE,
+                "username": "bob",
+                "actor_path": "/ap/users/bob",
+                "inbox_path": "/ap/users/bob/inbox",
+                "outbox_path": "/ap/users/bob/outbox",
+                "followers_path": "/ap/users/bob/followers",
+                "following_path": "/ap/users/bob/following",
+            },
+        )
+        multi = MultiActorHandler(
+            instance=instance,
+            resolver=lambda u: bob if u.lower() == "bob" else None,
+            actor_path_template="/ap/users/{username}",
+        )
+
+        # Canonical casing serves the actor document untouched.
+        doc = multi.actor_document("bob")
+        assert doc["id"] == f"{BASE}/ap/users/bob"
+        assert "movedTo" not in doc
+
+        # A case-variant request resolves the same actor but gets a
+        # document whose id matches the requested URI, marked movedTo
+        # the canonical actor.
+        doc = multi.actor_document("Bob")
+        assert doc["id"] == f"{BASE}/ap/users/Bob"
+        assert doc["movedTo"] == f"{BASE}/ap/users/bob"
+        assert doc["outbox"] == f"{BASE}/ap/users/Bob/outbox"
+        assert doc["followers"] == f"{BASE}/ap/users/Bob/followers"
+        assert doc["publicKey"]["id"] == f"{BASE}/ap/users/Bob#main-key"
+        assert doc["publicKey"]["owner"] == f"{BASE}/ap/users/Bob"
+        assert doc["preferredUsername"] == "bob"
+
+        assert multi.actor_document("carol") is None
