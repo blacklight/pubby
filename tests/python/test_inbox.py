@@ -919,6 +919,35 @@ class TestHandleQuoteRequest:
         assert stored_data["interactingObject"] == f"{actor_id}/statuses/2"
 
     @patch("pubby.handlers._inbox.requests")
+    def test_quote_request_remote_object_ignored(
+        self, mock_requests, inbox_processor, mock_storage
+    ):
+        """QuoteRequest quoting a non-local object is ignored — the
+        authorization would be attributed to this actor, which did not
+        author the quoted post (FEP-044f verification would fail)."""
+        actor_id = "https://remote.example.com/users/bob"
+        actor_data = _remote_actor_data(actor_id)
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = actor_data
+        mock_resp.raise_for_status = MagicMock()
+        mock_requests.get.return_value = mock_resp
+
+        activity = {
+            "id": f"{actor_id}/statuses/9/quote",
+            "type": "QuoteRequest",
+            "actor": actor_id,
+            "object": "https://elsewhere.example.net/post/1",
+            "instrument": f"{actor_id}/statuses/9",
+        }
+
+        result = inbox_processor.process(activity, skip_verification=True)
+        assert result is None
+        mock_requests.post.assert_not_called()
+        mock_storage.store_quote_authorization.assert_not_called()
+
+    @patch("pubby.handlers._inbox.requests")
     def test_quote_request_ignored_when_disabled(
         self, mock_requests, mock_storage, private_key
     ):

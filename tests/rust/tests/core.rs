@@ -603,6 +603,98 @@ fn test_inbox_follow_skip_verification() {
     assert!(out.is_none());
 }
 
+fn quote_request_handler(
+    dir: &tempfile::TempDir,
+) -> (Arc<ActivityPubHandler>, Arc<FileActivityPubStorage>) {
+    let storage = Arc::new(FileActivityPubStorage::new(dir.path(), true).unwrap());
+    let (priv_key, _) = generate_rsa_keypair(2048).unwrap();
+    let opts = HandlerOptions {
+        async_delivery: false,
+        ..HandlerOptions::default()
+    };
+    let handler =
+        Arc::new(ActivityPubHandler::new(storage.clone(), make_config(), priv_key, opts).unwrap());
+    (handler, storage)
+}
+
+fn seed_quoting_actor(storage: &FileActivityPubStorage) {
+    // ``.invalid`` guarantees the Accept delivery fails fast offline.
+    storage
+        .cache_remote_actor(
+            "https://r.invalid/u/1",
+            &json!({
+                "id": "https://r.invalid/u/1",
+                "type": "Person",
+                "preferredUsername": "u1",
+                "inbox": "https://r.invalid/u/1/inbox",
+                "outbox": "https://r.invalid/u/1/outbox",
+                "followers": "https://r.invalid/u/1/followers",
+                "following": "https://r.invalid/u/1/following",
+            }),
+            None,
+        )
+        .unwrap();
+}
+
+#[test]
+fn test_inbox_quote_request_local_object_approved() {
+    let dir = tempfile::tempdir().unwrap();
+    let (handler, storage) = quote_request_handler(&dir);
+    seed_quoting_actor(&storage);
+
+    let quote = json!({
+        "id": "https://r.invalid/u/1/quote/1",
+        "type": "QuoteRequest",
+        "actor": "https://r.invalid/u/1",
+        "object": "https://blog.example.com/post/1",
+        "instrument": "https://r.invalid/u/1/status/1",
+    });
+    let out = handler
+        .process_inbox_activity(&quote, "POST", "/ap/inbox", None, None, true)
+        .unwrap();
+    let accept = out.expect("a QuoteRequest for a local object is approved");
+    assert_eq!(accept["type"], "Accept");
+    assert_eq!(accept["actor"], "https://blog.example.com/ap/actor");
+
+    let auth_id = accept["result"].as_str().unwrap();
+    let stored = storage.get_quote_authorization(auth_id).unwrap().unwrap();
+    assert_eq!(stored["type"], "QuoteAuthorization");
+    assert_eq!(stored["attributedTo"], "https://blog.example.com/ap/actor");
+    assert_eq!(
+        stored["interactionTarget"],
+        "https://blog.example.com/post/1"
+    );
+    assert_eq!(
+        stored["interactingObject"],
+        "https://r.invalid/u/1/status/1"
+    );
+}
+
+#[test]
+fn test_inbox_quote_request_remote_object_ignored() {
+    let dir = tempfile::tempdir().unwrap();
+    let (handler, storage) = quote_request_handler(&dir);
+    seed_quoting_actor(&storage);
+
+    // Quoting a remote object must not be approved: the authorization
+    // would be attributed to this actor, which did not author the post.
+    let quote = json!({
+        "id": "https://r.invalid/u/1/quote/2",
+        "type": "QuoteRequest",
+        "actor": "https://r.invalid/u/1",
+        "object": "https://elsewhere.invalid/post/1",
+        "instrument": "https://r.invalid/u/1/status/2",
+    });
+    let out = handler
+        .process_inbox_activity(&quote, "POST", "/ap/inbox", None, None, true)
+        .unwrap();
+    assert!(out.is_none());
+    assert!(storage
+        .get_quote_authorization("https://blog.example.com/ap/actor/quote_authorizations/x")
+        .unwrap()
+        .is_none());
+}
+
 #[test]
 fn test_outbox_publish_and_collection() {
     let dir = tempfile::tempdir().unwrap();

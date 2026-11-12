@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- `InboxProcessor` (Python and Rust SDK): incoming `QuoteRequest`
+  activities quoting a non-local object are now ignored instead of being
+  auto-approved — the issued `QuoteAuthorization` is attributed to the
+  processing actor, which is only valid when that actor authored the
+  quoted post. Approvals for remote objects produced authorizations
+  remote verifiers (e.g. Mastodon) reject, leaving quotes pending.
+
 ## 0.6.12
 
 ### Fixed

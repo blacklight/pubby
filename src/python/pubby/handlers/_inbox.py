@@ -1013,6 +1013,10 @@ class InboxProcessor:
         ``QuoteAuthorization`` object, stores it so it can be served via
         HTTP GET, and sends an ``Accept`` activity (with the authorization
         URL as ``result``) back to the quoting actor's inbox.
+
+        Only requests quoting a *local* object are approved: the
+        authorization is attributed to this actor, which is only valid
+        when this actor authored the quoted post.
         """
         if not self.auto_approve_quotes:
             logger.info(
@@ -1036,6 +1040,13 @@ class InboxProcessor:
 
         if not quoted_uri or not quoting_uri:
             logger.info("QuoteRequest missing object or instrument — ignoring")
+            return None
+
+        # Same-host objects count as local even when their path prefix
+        # differs from the actor's (``_is_local_follow_target`` exists
+        # precisely because URL layouts are not assumed).
+        if not self._is_local_follow_target(quoted_uri):
+            logger.info("QuoteRequest for non-local object %s — ignoring", quoted_uri)
             return None
 
         actor_data = self._fetch_actor(activity.actor)

@@ -1128,6 +1128,16 @@ impl InboxProcessor {
             return Ok(None);
         }
 
+        // Only requests quoting a *local* object are approved: the
+        // authorization is attributed to this actor, which is only valid
+        // when this actor authored the quoted post. Same-host objects
+        // count as local even when their path prefix differs from the
+        // actor's (mirrors Python's ``_is_local_follow_target``).
+        if !self.is_local_follow_target(&quoted_uri) {
+            log::info!("QuoteRequest for non-local object {quoted_uri} — ignoring");
+            return Ok(None);
+        }
+
         let Some(actor_data) = self.fetch_actor(&activity.actor) else {
             log::warn!("Cannot fetch actor for QuoteRequest: {}", activity.actor);
             return Ok(None);
