@@ -21,7 +21,13 @@ from .._model import (
     Object,
 )
 from .. import cache as _cache
-from ..crypto import sign_request
+from ..crypto import (
+    Ed25519Identity,
+    SignatureScheme,
+    sign_request,
+    sign_request_rfc9421,
+    signing_identity,
+)
 from ..moderation import is_domain_blocked
 from ..quotes import FEP_044F_CONTEXT
 from ..storage import ActivityPubStorage
@@ -77,6 +83,8 @@ def deliver_activity(
     private_key: rsa.RSAPrivateKey,
     user_agent: str | None = None,
     timeout: float = 15.0,
+    signature_scheme: SignatureScheme | str = SignatureScheme.DRAFT_CAVAGE,
+    ed25519: Ed25519Identity | None = None,
 ) -> int:
     """
     Deliver an activity to a single inbox with one signed POST request.
@@ -94,15 +102,22 @@ def deliver_activity(
     :param user_agent: Optional ``User-Agent`` header; defaults to
         ``pubby/{version}``.
     :param timeout: HTTP request timeout in seconds.
+    :param signature_scheme: Wire format of the HTTP signature —
+        ``draft-cavage`` (default) or ``rfc9421``.
+    :param ed25519: Optional Ed25519 identity; used instead of the RSA key
+        when ``signature_scheme`` is ``rfc9421``.
     :return: The HTTP response status code.
     """
     body = json.dumps(activity).encode("utf-8")
     content_type = "application/activity+json"
     content_length = str(len(body))
 
-    signed_headers = sign_request(
-        private_key=private_key,
-        key_id=key_id,
+    scheme = SignatureScheme(signature_scheme)
+    signer = sign_request_rfc9421 if scheme is SignatureScheme.RFC9421 else sign_request
+    signing_key, signing_key_id = signing_identity(scheme, private_key, key_id, ed25519)
+    signed_headers = signer(
+        private_key=signing_key,
+        key_id=signing_key_id,
         method="POST",
         url=inbox_url,
         body=body,
@@ -110,14 +125,18 @@ def deliver_activity(
             "Content-Type": content_type,
             "Content-Length": content_length,
         },
-        signed_headers=[
-            "(request-target)",
-            "host",
-            "date",
-            "digest",
-            "content-type",
-            "content-length",
-        ],
+        signed_headers=(
+            None
+            if scheme is SignatureScheme.RFC9421
+            else [
+                "(request-target)",
+                "host",
+                "date",
+                "digest",
+                "content-type",
+                "content-length",
+            ]
+        ),
     )
 
     if user_agent is None:
@@ -593,6 +612,8 @@ class OutboxProcessor:
         deliver: Callable[[str, dict], None] | None = None,
         on_delivery_result: Callable[[dict], None] | None = None,
         document_cache: "DocumentCache | None" = None,
+        signature_scheme: SignatureScheme | str = SignatureScheme.DRAFT_CAVAGE,
+        ed25519: Ed25519Identity | None = None,
         **_,
     ):
         self.storage = storage
@@ -611,6 +632,8 @@ class OutboxProcessor:
         self.blocked_instances = blocked_instances
         self.deliver = deliver
         self.on_delivery_result = on_delivery_result
+        self.signature_scheme = SignatureScheme(signature_scheme)
+        self.ed25519 = ed25519
 
     def _new_activity_id(self) -> str:
         """Generate a unique activity ID."""
@@ -1037,9 +1060,20 @@ class OutboxProcessor:
             base_headers = {
                 "Accept": "application/activity+json, application/ld+json",
             }
-            signed_headers = sign_request(
-                private_key=self.private_key,  # type: ignore
-                key_id=self.key_id,
+            signer = (
+                sign_request_rfc9421
+                if self.signature_scheme is SignatureScheme.RFC9421
+                else sign_request
+            )
+            key, key_id = signing_identity(
+                self.signature_scheme,
+                self.private_key,  # type: ignore
+                self.key_id,
+                self.ed25519,
+            )
+            signed_headers = signer(
+                private_key=key,
+                key_id=key_id,
                 method="GET",
                 url=actor_url,
                 headers=base_headers,
@@ -1180,6 +1214,8 @@ class OutboxProcessor:
             private_key=self.private_key,  # type: ignore
             user_agent=self.user_agent,
             timeout=self.http_timeout,
+            signature_scheme=self.signature_scheme,
+            ed25519=self.ed25519,
         )
 
     def _deliver(self, inbox_url: str, activity: dict) -> bool:
@@ -1199,6 +1235,8 @@ class OutboxProcessor:
             private_key=self.private_key,  # type: ignore
             user_agent=self.user_agent,
             timeout=self.http_timeout,
+            signature_scheme=self.signature_scheme,
+            ed25519=self.ed25519,
         )
         return 200 <= status < 300
 

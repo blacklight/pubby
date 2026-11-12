@@ -2,7 +2,8 @@
 
 use serde_json::Value;
 
-use crate::crypto::signatures::{sign_request, SignOptions};
+use crate::crypto::signatures::SignOptions;
+use crate::crypto::{sign_outgoing, Ed25519Identity, SignatureScheme};
 use crate::handlers::client::get_default_user_agent;
 use crate::http::HttpClient;
 use crate::moderation::is_domain_blocked;
@@ -42,6 +43,11 @@ pub struct ResolveInboxOptions<'a> {
     pub blocked_instances: Option<&'a [String]>,
     /// `User-Agent` header; defaults to `pubby/{version} (+{actor_url})`.
     pub user_agent: Option<String>,
+    /// Wire format for the signed actor fetch. Defaults to
+    /// [`SignatureScheme::DraftCavage`].
+    pub signature_scheme: SignatureScheme,
+    /// Ed25519 identity for the signed fetch under RFC 9421.
+    pub ed25519: Option<&'a Ed25519Identity>,
 }
 
 /// Resolve a remote actor's inbox, using the cache and an optional signed
@@ -100,7 +106,16 @@ pub fn resolve_actor_inbox(
             headers: headers.clone(),
             signed_headers: None,
         };
-        match sign_request(key, key_id, "GET", actor_url, None, &opts) {
+        match sign_outgoing(
+            options.signature_scheme,
+            key,
+            key_id,
+            options.ed25519,
+            "GET",
+            actor_url,
+            None,
+            &opts,
+        ) {
             Ok(signed) => headers = signed,
             Err(e) => {
                 log::warn!("Failed to sign actor fetch for {actor_url}: {e}");

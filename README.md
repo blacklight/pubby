@@ -108,7 +108,16 @@ you can focus on your app:
 - **Outbox delivery** — concurrent fan-out to follower inboxes with retry and
   shared-inbox deduplication
 - **HTTP Signatures** — sign outgoing requests and verify incoming ones
-  (draft-cavage, using `cryptography` directly — no `httpsig` dependency)
+  (draft-cavage, using `cryptography` directly — no `httpsig` dependency).
+  Both SDKs also speak RFC 9421 HTTP Message Signatures: pass
+  `signature_scheme="rfc9421"` (Python) or `SignatureScheme::Rfc9421` (Rust)
+  to sign deliveries and actor fetches in that format. The default stays
+  draft-cavage; inbound verification accepts both formats automatically, and
+  RFC 9421 verification accepts RSA (`rsa-v1_5-sha256`) and Ed25519 keys.
+  An actor can carry a per-actor Ed25519 key (`ed25519_private_key` in
+  Python, `HandlerOptions.ed25519_key` in Rust): it is advertised in the
+  actor document's `additionalPublicKeys` under `<actor_id>#ed25519-key`,
+  and RFC 9421 deliveries are signed with it
 - **Discovery** — WebFinger and NodeInfo 2.1 endpoints
 - **Interaction storage** — followers, interactions, activities, actor cache
 - **Framework adapters** — Flask, FastAPI, Tornado
@@ -812,6 +821,8 @@ activity that was delivered.
 | `software_name` | `str` | `"pubby"` | NodeInfo software name |
 | `software_version` | `str` | `pubby.__version__` | NodeInfo software version |
 | `async_delivery` | `bool` | `True` | Run delivery fan-out in background thread (non-blocking) |
+| `signature_scheme` | `str` | `"draft-cavage"` | Wire format for outgoing HTTP signatures on deliveries and actor fetches: `"draft-cavage"` or `"rfc9421"`. Inbound requests are verified in either format regardless |
+| `ed25519_private_key` | `Ed25519PrivateKey \| str \| bytes` | `None` | Per-actor Ed25519 key (object or PKCS#8 PEM). Advertised in `additionalPublicKeys` and used for RFC 9421 signing when `signature_scheme="rfc9421"` |
 | `allowed_instances` | `Collection[str]` | `None` | Only federate with these instance domains (allow-list) |
 | `blocked_instances` | `Collection[str]` | `None` | Never federate with these instance domains (block-list) |
 | `deliver` | `Callable[[str, dict], None]` | `None` | Custom delivery callable invoked per inbox (see Custom Delivery) |

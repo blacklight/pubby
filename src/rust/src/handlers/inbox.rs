@@ -10,8 +10,10 @@ use serde_json::{json, Value};
 use crate::attribution::validate as validate_attribution;
 use crate::audience::{is_public, mentioned_actors};
 use crate::cache::{self, DocumentCache};
-use crate::crypto::keys::load_public_key;
-use crate::crypto::signatures::{sign_request, signature_key_id, verify_request, SignOptions};
+use crate::crypto::keys::{load_any_public_key, load_public_key};
+use crate::crypto::rfc9421;
+use crate::crypto::signatures::{signature_key_id, verify_request, SignOptions};
+use crate::crypto::{sign_outgoing, Ed25519Identity, SignatureScheme};
 use crate::error::{ActivityPubError, Result};
 use crate::http::HttpClient;
 use crate::model::{
@@ -24,6 +26,35 @@ use crate::storage::ActivityPubStorage;
 
 use super::client::get_default_user_agent;
 use super::outbox::build_quote_authorization;
+
+/// Every key an actor document advertises: `publicKey` (object or array)
+/// followed by `additionalPublicKeys` (Misskey-style Ed25519 keys).
+fn advertised_keys(actor: &Value) -> Vec<&Value> {
+    fn entries(value: Option<&Value>) -> Vec<&Value> {
+        match value {
+            Some(Value::Array(a)) => a.iter().collect(),
+            Some(entry @ Value::Object(_)) => vec![entry],
+            _ => Vec::new(),
+        }
+    }
+    let mut keys = entries(actor.get("publicKey"));
+    keys.extend(entries(actor.get("additionalPublicKeys")));
+    keys
+}
+
+/// The PEM of the advertised key whose `id` is `key_id`. Falls back to the
+/// first `publicKey` entry when no id matches, which keeps actors whose
+/// key ids differ from their `keyId` working.
+fn public_key_pem_for(actor: &Value, key_id: &str) -> Option<String> {
+    let keys = advertised_keys(actor);
+    keys.iter()
+        .find(|k| k.get("id").and_then(Value::as_str) == Some(key_id))
+        .or_else(|| keys.first())
+        .and_then(|k| k.get("publicKeyPem"))
+        .and_then(Value::as_str)
+        .filter(|pem| !pem.is_empty())
+        .map(String::from)
+}
 
 /// Callback invoked when an interaction is received.
 pub type OnInteractionReceived = Arc<dyn Fn(&Interaction) + Send + Sync>;
@@ -96,6 +127,12 @@ pub struct InboxOptions {
     /// Callback for `Accept`/`Reject` of this actor's outbound
     /// `Follow`s — `(target_actor_id, accepted)`.
     pub on_follow_response: Option<OnFollowResponse>,
+    /// Wire format for outgoing signed requests (actor fetches and
+    /// `Accept`/`Reject` deliveries). Inbound verification accepts both.
+    pub signature_scheme: SignatureScheme,
+    /// Ed25519 identity used for outgoing RFC 9421 requests when the
+    /// scheme is [`SignatureScheme::Rfc9421`].
+    pub ed25519: Option<Ed25519Identity>,
 }
 
 impl InboxOptions {
@@ -126,6 +163,8 @@ impl InboxOptions {
             follow_policy: None,
             on_activity: None,
             on_follow_response: None,
+            signature_scheme: SignatureScheme::default(),
+            ed25519: None,
         }
     }
 }
@@ -170,6 +209,10 @@ pub struct InboxProcessor {
     /// Callback for `Accept`/`Reject` of this actor's outbound
     /// `Follow`s — `(target_actor_id, accepted)`.
     pub on_follow_response: Option<OnFollowResponse>,
+    /// Wire format for outgoing signed requests (see [`InboxOptions`]).
+    pub signature_scheme: SignatureScheme,
+    /// Ed25519 identity for outgoing RFC 9421 requests (see [`InboxOptions`]).
+    pub ed25519: Option<Ed25519Identity>,
 }
 
 impl InboxProcessor {
@@ -229,6 +272,8 @@ impl InboxProcessor {
             follow_policy: opts.follow_policy,
             on_activity: opts.on_activity,
             on_follow_response: opts.on_follow_response,
+            signature_scheme: opts.signature_scheme,
+            ed25519: opts.ed25519,
             actor_id,
         }
     }
@@ -295,9 +340,11 @@ impl InboxProcessor {
             headers: base_headers.clone(),
             signed_headers: None,
         };
-        let headers = match sign_request(
+        let headers = match sign_outgoing(
+            self.signature_scheme,
             &self.private_key,
             &self.key_id,
+            self.ed25519.as_ref(),
             "GET",
             actor_id,
             None,
@@ -349,13 +396,24 @@ impl InboxProcessor {
             .iter()
             .map(|(k, v)| (k.to_lowercase(), v.clone()))
             .collect();
-        let sig_header = lower.get("signature").ok_or_else(|| {
-            ActivityPubError::SignatureVerification("Missing Signature header".into())
-        })?;
 
-        let key_id = signature_key_id(sig_header).ok_or_else(|| {
-            ActivityPubError::SignatureVerification("No keyId in Signature header".into())
-        })?;
+        let (key_id, rfc9421_sig) = match rfc9421::parse_signatures(&lower)?.into_iter().next() {
+            Some(sig) => {
+                let key_id = sig.key_id().ok_or_else(|| {
+                    ActivityPubError::SignatureVerification("No keyid in Signature-Input".into())
+                })?;
+                (key_id.to_string(), Some(sig))
+            }
+            None => {
+                let sig_header = lower.get("signature").ok_or_else(|| {
+                    ActivityPubError::SignatureVerification("Missing Signature header".into())
+                })?;
+                let key_id = signature_key_id(sig_header).ok_or_else(|| {
+                    ActivityPubError::SignatureVerification("No keyId in Signature header".into())
+                })?;
+                (key_id, None)
+            }
+        };
 
         let actor_url = key_id.split('#').next().unwrap_or_default().to_string();
 
@@ -365,21 +423,23 @@ impl InboxProcessor {
             ))
         })?;
 
-        let public_key_pem = actor_data
-            .get("publicKey")
-            .and_then(|pk| pk.as_object())
-            .and_then(|pk| pk.get("publicKeyPem"))
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_string();
+        let public_key_pem = public_key_pem_for(&actor_data, &key_id).unwrap_or_default();
         if public_key_pem.is_empty() {
             return Err(ActivityPubError::SignatureVerification(format!(
                 "No public key found for actor: {actor_url}"
             )));
         }
 
-        let public_key = load_public_key(&public_key_pem)?;
-        verify_request(&public_key, method, path, headers, body)?;
+        match &rfc9421_sig {
+            Some(sig) => {
+                let public_key = load_any_public_key(&public_key_pem)?;
+                rfc9421::verify_request(&public_key, sig, method, path, &lower, body)?;
+            }
+            None => {
+                let public_key = load_public_key(&public_key_pem)?;
+                verify_request(&public_key, method, path, headers, body)?;
+            }
+        }
 
         if let Some(expected) = expected_actor {
             if expected != actor_url {
@@ -397,12 +457,7 @@ impl InboxProcessor {
                 "Cannot fetch expected actor for key ownership check: {expected_actor}"
             ))
         })?;
-        let pk = actor_data.get("publicKey").cloned().unwrap_or(Value::Null);
-        let keys: Vec<Value> = match pk {
-            Value::Array(a) => a,
-            other => vec![other],
-        };
-        let owned = keys
+        let owned = advertised_keys(&actor_data)
             .iter()
             .any(|k| k.get("id").and_then(|v| v.as_str()) == Some(key_id));
         if owned {
@@ -1202,9 +1257,11 @@ impl InboxProcessor {
             signed_headers: None,
         };
         let result = (|| -> Result<bool> {
-            let mut headers = sign_request(
+            let mut headers = sign_outgoing(
+                self.signature_scheme,
                 &self.private_key,
                 &self.key_id,
+                self.ed25519.as_ref(),
                 "POST",
                 inbox_url,
                 Some(&body),
@@ -1226,5 +1283,157 @@ impl InboxProcessor {
                 false
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::crypto::keys::{export_public_key_pem, generate_rsa_keypair};
+    use crate::storage::file::FileActivityPubStorage;
+    use serde_json::json;
+
+    const ACTOR: &str = "https://remote.example/ap/actor";
+    const KEY_ID: &str = "https://remote.example/ap/actor#main-key";
+    const INBOX: &str = "https://yonder.example/ap/inbox";
+    const BODY: &[u8] = br#"{"type":"Follow"}"#;
+
+    #[test]
+    fn verifies_both_signature_schemes_on_the_inbox() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage: Arc<dyn ActivityPubStorage> =
+            Arc::new(FileActivityPubStorage::new(dir.path(), true).unwrap());
+        let (remote_key, remote_public) = generate_rsa_keypair(1024).unwrap();
+        let actor = json!({
+            "id": ACTOR,
+            "publicKey": {"id": KEY_ID, "publicKeyPem": export_public_key_pem(&remote_public).unwrap()},
+        });
+        storage.cache_remote_actor(ACTOR, &actor, None).unwrap();
+        let (local_key, _) = generate_rsa_keypair(1024).unwrap();
+        let inbox = InboxProcessor::with_options(InboxOptions::new(
+            storage.clone(),
+            "https://yonder.example/ap/actor",
+            local_key,
+            "https://yonder.example/ap/actor#main-key",
+        ));
+
+        for scheme in [SignatureScheme::DraftCavage, SignatureScheme::Rfc9421] {
+            let mut headers = sign_outgoing(
+                scheme,
+                &remote_key,
+                KEY_ID,
+                None,
+                "POST",
+                INBOX,
+                Some(BODY),
+                &SignOptions::default(),
+            )
+            .unwrap();
+            headers.insert("Host".into(), "yonder.example".into());
+
+            let verified = inbox
+                .verify_signature("POST", "/ap/inbox", &headers, Some(BODY), Some(ACTOR))
+                .unwrap();
+            assert_eq!(verified, ACTOR, "{scheme:?}");
+            assert!(
+                inbox
+                    .verify_signature("POST", "/ap/inbox", &headers, Some(b"{}"), Some(ACTOR))
+                    .is_err(),
+                "{scheme:?} accepted a tampered body"
+            );
+        }
+    }
+    #[test]
+    fn verifies_rfc9421_ed25519_actor_on_the_inbox() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage: Arc<dyn ActivityPubStorage> =
+            Arc::new(FileActivityPubStorage::new(dir.path(), true).unwrap());
+        let remote_key = ed25519_dalek::SigningKey::from_bytes(&[9u8; 32]);
+        let remote_pem = {
+            use ed25519_dalek::pkcs8::EncodePublicKey;
+            remote_key
+                .verifying_key()
+                .to_public_key_pem(rsa::pkcs8::LineEnding::LF)
+                .unwrap()
+        };
+        let actor = json!({
+            "id": ACTOR,
+            "publicKey": {"id": KEY_ID, "publicKeyPem": remote_pem},
+        });
+        storage.cache_remote_actor(ACTOR, &actor, None).unwrap();
+        let (local_key, _) = generate_rsa_keypair(1024).unwrap();
+        let inbox = InboxProcessor::with_options(InboxOptions::new(
+            storage.clone(),
+            "https://yonder.example/ap/actor",
+            local_key,
+            "https://yonder.example/ap/actor#main-key",
+        ));
+
+        let mut headers = crate::crypto::rfc9421::sign_request_ed25519(
+            &remote_key,
+            KEY_ID,
+            "POST",
+            INBOX,
+            Some(BODY),
+            &SignOptions::default(),
+        )
+        .unwrap();
+        headers.insert("Host".into(), "yonder.example".into());
+
+        let verified = inbox
+            .verify_signature("POST", "/ap/inbox", &headers, Some(BODY), Some(ACTOR))
+            .unwrap();
+        assert_eq!(verified, ACTOR);
+        assert!(inbox
+            .verify_signature("POST", "/ap/inbox", &headers, Some(b"{}"), Some(ACTOR))
+            .is_err());
+    }
+    #[test]
+    fn verifies_ed25519_key_listed_in_additional_public_keys() {
+        // Misskey-style actor: RSA key under `publicKey`, Ed25519 key only
+        // under `additionalPublicKeys`.
+        let dir = tempfile::tempdir().unwrap();
+        let storage: Arc<dyn ActivityPubStorage> =
+            Arc::new(FileActivityPubStorage::new(dir.path(), true).unwrap());
+        let remote_rsa = generate_rsa_keypair(1024).unwrap().0;
+        let remote_ed = ed25519_dalek::SigningKey::from_bytes(&[9u8; 32]);
+        let actor = json!({
+            "id": ACTOR,
+            "publicKey": {
+                "id": KEY_ID,
+                "publicKeyPem": export_public_key_pem(&rsa::RsaPublicKey::from(&remote_rsa)).unwrap(),
+            },
+            "additionalPublicKeys": [{
+                "id": format!("{ACTOR}#ed25519-key"),
+                "type": "Key",
+                "owner": ACTOR,
+                "publicKeyPem": crate::crypto::export_ed25519_public_key_pem(&remote_ed.verifying_key()).unwrap(),
+            }],
+        });
+        storage.cache_remote_actor(ACTOR, &actor, None).unwrap();
+        let (local_key, _) = generate_rsa_keypair(1024).unwrap();
+        let inbox = InboxProcessor::with_options(InboxOptions::new(
+            storage.clone(),
+            "https://yonder.example/ap/actor",
+            local_key,
+            "https://yonder.example/ap/actor#main-key",
+        ));
+        let ed_key_id = format!("{ACTOR}#ed25519-key");
+        let mut headers = crate::crypto::rfc9421::sign_request_ed25519(
+            &remote_ed,
+            &ed_key_id,
+            "POST",
+            INBOX,
+            Some(BODY),
+            &SignOptions::default(),
+        )
+        .unwrap();
+        headers.insert("Host".into(), "yonder.example".into());
+        assert_eq!(
+            inbox
+                .verify_signature("POST", "/ap/inbox", &headers, Some(BODY), Some(ACTOR))
+                .unwrap(),
+            ACTOR
+        );
     }
 }

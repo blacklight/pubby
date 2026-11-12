@@ -34,8 +34,17 @@ from .._exceptions import (
 from .. import cache as _cache
 from ..attribution import validate as _validate_attribution
 from ..audience import is_public, mentioned_actors
-from ..crypto import sign_request, verify_request
-from ..crypto._keys import load_public_key
+from ..crypto import (
+    SignatureScheme,
+    parse_signatures_rfc9421,
+    sign_request,
+    sign_request_rfc9421,
+    signing_identity,
+    verify_request,
+    verify_request_rfc9421,
+)
+from ..crypto._keys import load_any_public_key, load_public_key
+from ..crypto._signatures import Ed25519Identity
 from ..moderation import extract_domain, is_domain_blocked
 from ..quotes import FEP_044F_CONTEXT, extract_quote_target
 from ..storage import ActivityPubStorage
@@ -46,6 +55,34 @@ if TYPE_CHECKING:
     from ..cache import DocumentCache
 
 logger = logging.getLogger(__name__)
+
+
+def _advertised_keys(actor: dict) -> list[dict]:
+    """
+    Every key an actor document advertises: ``publicKey`` (object or list)
+    followed by ``additionalPublicKeys`` (Misskey-style Ed25519 keys).
+    """
+    keys: list[dict] = []
+    for field_name in ("publicKey", "additionalPublicKeys"):
+        value = actor.get(field_name)
+        entries = value if isinstance(value, list) else [value]
+        keys.extend(entry for entry in entries if isinstance(entry, dict))
+    return keys
+
+
+def _public_key_pem_for(actor: dict, key_id: str) -> str:
+    """
+    The PEM of the advertised key whose ``id`` is ``key_id``. Falls back to
+    the first ``publicKey`` entry when no id matches, which keeps actors
+    whose key ids differ from their ``keyId`` working.
+    """
+    keys = _advertised_keys(actor)
+    match = next((k for k in keys if k.get("id") == key_id), None)
+    if match is None and keys:
+        match = keys[0]
+    if match is None:
+        return ""
+    return match.get("publicKeyPem", "") or ""
 
 
 class InboxProcessor:
@@ -116,6 +153,8 @@ class InboxProcessor:
         on_activity=None,
         on_follow_response=None,
         allow_private_targets: bool = False,
+        signature_scheme: SignatureScheme | str = SignatureScheme.DRAFT_CAVAGE,
+        ed25519: Ed25519Identity | None = None,
     ):
         self.storage = storage
         self.actor_id = actor_id
@@ -135,6 +174,8 @@ class InboxProcessor:
         self.on_activity = on_activity
         self.on_follow_response = on_follow_response
         self.allow_private_targets = allow_private_targets
+        self.signature_scheme = SignatureScheme(signature_scheme)
+        self.ed25519 = ed25519
 
     def _invalidate_cached_documents(self, *prefixes) -> None:
         """Drop cached dereference documents when followers change."""
@@ -186,9 +227,20 @@ class InboxProcessor:
             base_headers = {
                 "Accept": "application/activity+json, application/ld+json",
             }
-            signed_headers = sign_request(
-                private_key=self.private_key,  # type: ignore
-                key_id=self.key_id,
+            signer = (
+                sign_request_rfc9421
+                if self.signature_scheme is SignatureScheme.RFC9421
+                else sign_request
+            )
+            key, key_id = signing_identity(
+                self.signature_scheme,
+                self.private_key,  # type: ignore
+                self.key_id,
+                self.ed25519,
+            )
+            signed_headers = signer(
+                private_key=key,
+                key_id=key_id,
                 method="GET",
                 url=actor_id,
                 headers=base_headers,
@@ -246,22 +298,30 @@ class InboxProcessor:
         :raises SignatureVerificationError: If the signature is invalid or
             the signer is not the expected actor.
         """
-        # Parse the Signature header to find keyId
         lower_headers = {k.lower(): v for k, v in headers.items()}
-        sig_header = lower_headers.get("signature", "")
-        if not sig_header:
-            raise SignatureVerificationError("Missing Signature header")
+        rfc9421_sigs = parse_signatures_rfc9421(lower_headers)
+        if rfc9421_sigs:
+            rfc9421_sig = rfc9421_sigs[0]
+            key_id = rfc9421_sig.key_id
+            if not key_id:
+                raise SignatureVerificationError("No keyid in Signature-Input")
+        else:
+            rfc9421_sig = None
+            # Parse the Signature header to find keyId
+            sig_header = lower_headers.get("signature", "")
+            if not sig_header:
+                raise SignatureVerificationError("Missing Signature header")
 
-        # Extract keyId
-        key_id = ""
-        for part in sig_header.split(","):
-            part = part.strip()
-            if part.startswith("keyId="):
-                key_id = part.split("=", 1)[1].strip('"')
-                break
+            # Extract keyId
+            key_id = ""
+            for part in sig_header.split(","):
+                part = part.strip()
+                if part.startswith("keyId="):
+                    key_id = part.split("=", 1)[1].strip('"')
+                    break
 
-        if not key_id:
-            raise SignatureVerificationError("No keyId in Signature header")
+            if not key_id:
+                raise SignatureVerificationError("No keyId in Signature header")
 
         # Derive actor URL from keyId (strip fragment)
         actor_url = key_id.split("#")[0]
@@ -273,18 +333,24 @@ class InboxProcessor:
                 f"Cannot fetch actor for key verification: {actor_url}"
             )
 
-        public_key_pem = ""
-        pk = actor_data.get("publicKey")
-        if isinstance(pk, dict):
-            public_key_pem = pk.get("publicKeyPem", "")
+        public_key_pem = _public_key_pem_for(actor_data, key_id)
 
         if not public_key_pem:
             raise SignatureVerificationError(
                 f"No public key found for actor: {actor_url}"
             )
 
-        public_key = load_public_key(public_key_pem)
-        verify_request(public_key, method, path, headers, body)
+        if rfc9421_sig is not None:
+            verify_request_rfc9421(
+                load_any_public_key(public_key_pem),
+                rfc9421_sig,
+                method,
+                path,
+                lower_headers,
+                body,
+            )
+        else:
+            verify_request(load_public_key(public_key_pem), method, path, headers, body)
 
         if expected_actor and expected_actor != actor_url:
             self._verify_key_ownership(key_id, expected_actor)
@@ -309,9 +375,7 @@ class InboxProcessor:
                 f"{expected_actor}"
             )
 
-        pk = actor_data.get("publicKey")
-        keys = pk if isinstance(pk, list) else [pk]
-        if any(isinstance(key, dict) and key.get("id") == key_id for key in keys):
+        if any(key.get("id") == key_id for key in _advertised_keys(actor_data)):
             return
 
         raise SignatureVerificationError(
@@ -1099,9 +1163,20 @@ class InboxProcessor:
         body = json.dumps(activity).encode("utf-8")
 
         try:
-            signed_headers = sign_request(
-                private_key=self.private_key,  # type: ignore
-                key_id=self.key_id,
+            signer = (
+                sign_request_rfc9421
+                if self.signature_scheme is SignatureScheme.RFC9421
+                else sign_request
+            )
+            key, key_id = signing_identity(
+                self.signature_scheme,
+                self.private_key,  # type: ignore
+                self.key_id,
+                self.ed25519,
+            )
+            signed_headers = signer(
+                private_key=key,
+                key_id=key_id,
                 method="POST",
                 url=inbox_url,
                 body=body,

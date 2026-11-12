@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric import ed25519, rsa
 
 
 def generate_rsa_keypair(
@@ -52,6 +52,49 @@ def load_public_key(pem_data: str | bytes) -> rsa.RSAPublicKey:
     key = serialization.load_pem_public_key(pem_data)
     if not isinstance(key, rsa.RSAPublicKey):
         raise TypeError(f"Expected RSA public key, got {type(key).__name__}")
+    return key
+
+
+def load_any_public_key(
+    pem_data: str | bytes,
+) -> rsa.RSAPublicKey | ed25519.Ed25519PublicKey:
+    """
+    Load an RSA or Ed25519 public key from SPKI PEM data.
+
+    :param pem_data: PEM-encoded public key string or bytes.
+    :return: The loaded public key.
+    :raises TypeError: If the key is neither RSA nor Ed25519.
+    """
+    if isinstance(pem_data, str):
+        pem_data = pem_data.encode("utf-8")
+    key = serialization.load_pem_public_key(pem_data)
+    if not isinstance(key, (rsa.RSAPublicKey, ed25519.Ed25519PublicKey)):
+        raise TypeError(f"Unsupported public key type: {type(key).__name__}")
+    return key
+
+
+def generate_ed25519_private_key() -> ed25519.Ed25519PrivateKey:
+    """
+    Generate a new Ed25519 private key.
+
+    :return: The generated Ed25519 private key.
+    """
+    return ed25519.Ed25519PrivateKey.generate()
+
+
+def load_ed25519_private_key(pem_data: str | bytes) -> ed25519.Ed25519PrivateKey:
+    """
+    Load an Ed25519 private key from PKCS#8 PEM data.
+
+    :param pem_data: PEM-encoded private key string or bytes.
+    :return: The loaded Ed25519 private key.
+    :raises TypeError: If the key is not Ed25519.
+    """
+    if isinstance(pem_data, str):
+        pem_data = pem_data.encode("utf-8")
+    key = serialization.load_pem_private_key(pem_data, password=None)
+    if not isinstance(key, ed25519.Ed25519PrivateKey):
+        raise TypeError(f"Expected Ed25519 private key, got {type(key).__name__}")
     return key
 
 

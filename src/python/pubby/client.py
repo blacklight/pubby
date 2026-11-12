@@ -8,7 +8,14 @@ import requests
 from cryptography.hazmat.primitives.asymmetric import rsa
 from requests import ConnectionError, HTTPError
 
-from .crypto import load_private_key, sign_request
+from .crypto import (
+    Ed25519Identity,
+    SignatureScheme,
+    load_private_key,
+    sign_request,
+    sign_request_rfc9421,
+    signing_identity,
+)
 from .handlers._client import get_default_user_agent
 from ._http import guarded_get, is_safe_outbound_url
 from .moderation import is_domain_blocked
@@ -64,6 +71,8 @@ def resolve_actor_inbox(
     user_agent: str | None = None,
     timeout: float = 10.0,
     allow_private_targets: bool = False,
+    signature_scheme: SignatureScheme | str = SignatureScheme.DRAFT_CAVAGE,
+    ed25519: Ed25519Identity | None = None,
 ) -> str | None:
     """
     Resolve a remote actor's inbox, using the cache and an optional signed fetch.
@@ -88,6 +97,10 @@ def resolve_actor_inbox(
     :param user_agent: Optional ``User-Agent`` header; defaults to
         ``pubby/{version} (+{actor_url})``.
     :param timeout: HTTP request timeout in seconds.
+    :param signature_scheme: Wire format of the signed actor fetch —
+        ``draft-cavage`` (default) or ``rfc9421``.
+    :param ed25519: Optional Ed25519 identity used for the signed fetch
+        under ``rfc9421``.
     :return: The resolved inbox URL, or ``None`` if the actor is blocked,
         unreachable, unparseable, or has no inbox.
     """
@@ -123,9 +136,17 @@ def resolve_actor_inbox(
         if private_key is not None and key_id is not None:
             key = _load_private_key(private_key)
             if key is not None:
-                signed = sign_request(
-                    private_key=key,
-                    key_id=key_id,
+                signer = (
+                    sign_request_rfc9421
+                    if SignatureScheme(signature_scheme) is SignatureScheme.RFC9421
+                    else sign_request
+                )
+                signing_key, signing_key_id = signing_identity(
+                    signature_scheme, key, key_id, ed25519
+                )
+                signed = signer(
+                    private_key=signing_key,
+                    key_id=signing_key_id,
                     method="GET",
                     url=actor_url,
                     headers=headers,

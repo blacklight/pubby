@@ -8,7 +8,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Collection, Dict, List, Optional, Union
 
+from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from jinja2 import Template
 from markupsafe import Markup
 
@@ -22,7 +24,12 @@ from .._model import (
 )
 from .. import cache as _cache
 from ..collections import ordered_collection
-from ..crypto._keys import load_private_key, export_public_key_pem
+from ..crypto import Ed25519Identity, SignatureScheme
+from ..crypto._keys import (
+    export_public_key_pem,
+    load_ed25519_private_key,
+    load_private_key,
+)
 from ..render import InteractionsRenderer
 from ..storage import ActivityPubStorage
 from ._discovery import (
@@ -106,6 +113,9 @@ class ActivityPubHandler:
         published activities, followers gained or lost). Adapters fall
         back to this attribute when ``bind_activitypub`` receives no
         explicit cache.
+    :param signature_scheme: Wire format of outgoing HTTP signatures
+        (deliveries and actor fetches) — ``draft-cavage`` (default) or
+        ``rfc9421``. Inbound requests are verified in either format.
     """
 
     def __init__(
@@ -140,6 +150,8 @@ class ActivityPubHandler:
         on_follow_response=None,
         on_delivery_result=None,
         nodeinfo_stats=None,
+        signature_scheme: SignatureScheme | str = SignatureScheme.DRAFT_CAVAGE,
+        ed25519_private_key: Ed25519PrivateKey | str | bytes | None = None,
     ):
         self.storage = storage
         self.document_cache = document_cache  # property: propagates to processors
@@ -178,6 +190,7 @@ class ActivityPubHandler:
         )
         self.shared_inbox_url = f"{self.base_url}/ap/inbox"
         self.key_id = f"{self.actor_id}#main-key"
+        self.ed25519: Ed25519Identity | None = None
 
         # WebFinger domain
         from urllib.parse import urlparse
@@ -197,6 +210,24 @@ class ActivityPubHandler:
             raise ValueError("Either private_key or private_key_path must be provided")
 
         self.public_key_pem = export_public_key_pem(self._private_key.public_key())
+
+        if ed25519_private_key is not None:
+            ed25519_key = (
+                load_ed25519_private_key(ed25519_private_key)
+                if isinstance(ed25519_private_key, (str, bytes))
+                else ed25519_private_key
+            )
+            self.ed25519 = Ed25519Identity(
+                key_id=f"{self.actor_id}#ed25519-key", key=ed25519_key
+            )
+            self.ed25519_public_key_pem = (
+                ed25519_key.public_key()
+                .public_bytes(
+                    serialization.Encoding.PEM,
+                    serialization.PublicFormat.SubjectPublicKeyInfo,
+                )
+                .decode("ascii")
+            )
 
         # Software info
         self.software_name = software_name
@@ -224,6 +255,8 @@ class ActivityPubHandler:
             allow_private_targets=allow_private_targets,
             on_activity=on_activity,
             on_follow_response=on_follow_response,
+            signature_scheme=signature_scheme,
+            ed25519=self.ed25519,
             follow_policy=(
                 follow_policy
                 if follow_policy is not None
@@ -250,6 +283,8 @@ class ActivityPubHandler:
             deliver=deliver,
             on_delivery_result=on_delivery_result,
             document_cache=document_cache,
+            signature_scheme=signature_scheme,
+            ed25519=self.ed25519,
         )
         self.nodeinfo_stats = nodeinfo_stats
 
@@ -393,7 +428,17 @@ class ActivityPubHandler:
             also_known_as=self.actor_also_known_as,
         )
 
-        return actor.to_dict()
+        doc = actor.to_dict()
+        if self.ed25519 is not None:
+            doc["additionalPublicKeys"] = [
+                {
+                    "id": self.ed25519.key_id,
+                    "type": "Key",
+                    "owner": self.actor_id,
+                    "publicKeyPem": self.ed25519_public_key_pem,
+                }
+            ]
+        return doc
 
     def publish_actor_update(self, document: Optional[dict] = None) -> dict:
         """

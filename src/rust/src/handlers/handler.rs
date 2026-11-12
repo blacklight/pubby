@@ -11,7 +11,8 @@ use serde_json::{json, Value};
 
 use crate::cache::{self, DocumentCache};
 use crate::collections::ordered_collection;
-use crate::crypto::keys::export_public_key_pem;
+use crate::crypto::keys::{export_ed25519_public_key_pem, export_public_key_pem};
+use crate::crypto::{Ed25519Identity, SignatureScheme};
 use crate::error::Result;
 use crate::model::{ap_context, Actor, ActorConfig, FollowPolicy, Interaction, Object};
 use crate::render::InteractionsRenderer;
@@ -90,6 +91,15 @@ pub struct HandlerOptions {
     /// Callback producing real NodeInfo usage stats. When unset,
     /// `users = 1` and the stored activity count are reported.
     pub nodeinfo_stats: Option<NodeInfoStatsFn>,
+    /// Wire format for outgoing signed requests — deliveries and actor
+    /// fetches. Inbound verification accepts both formats regardless.
+    /// Defaults to [`SignatureScheme::DraftCavage`].
+    pub signature_scheme: SignatureScheme,
+    /// Ed25519 private key for the actor. When set, the actor document
+    /// advertises it in `additionalPublicKeys` under
+    /// `<actor_id>#ed25519-key`, and RFC 9421 requests are signed with it
+    /// instead of the RSA key.
+    pub ed25519_key: Option<ed25519_dalek::SigningKey>,
 }
 
 impl Default for HandlerOptions {
@@ -123,6 +133,8 @@ impl Default for HandlerOptions {
             on_follow_response: None,
             on_delivery_result: None,
             nodeinfo_stats: None,
+            signature_scheme: SignatureScheme::default(),
+            ed25519_key: None,
         }
     }
 }
@@ -198,6 +210,13 @@ pub struct ActivityPubHandler {
     pub renderer: InteractionsRenderer,
     /// NodeInfo stats callback.
     pub nodeinfo_stats: Option<NodeInfoStatsFn>,
+    /// PEM (SPKI) of the Ed25519 key advertised in `additionalPublicKeys`.
+    pub ed25519_public_key_pem: Option<String>,
+}
+
+/// The `keyId` an Ed25519 actor key is advertised under.
+pub fn ed25519_key_id(actor_id: &str) -> String {
+    format!("{actor_id}#ed25519-key")
 }
 
 impl ActivityPubHandler {
@@ -272,6 +291,15 @@ impl ActivityPubHandler {
             }
         });
 
+        let ed25519 = options.ed25519_key.clone().map(|key| Ed25519Identity {
+            key_id: ed25519_key_id(&actor_id),
+            key,
+        });
+        let ed25519_public_key_pem = ed25519
+            .as_ref()
+            .map(|identity| export_ed25519_public_key_pem(&identity.key.verifying_key()))
+            .transpose()?;
+
         let mut inbox_opts = super::inbox::InboxOptions::new(
             storage.clone(),
             actor_id.clone(),
@@ -291,6 +319,8 @@ impl ActivityPubHandler {
         inbox_opts.document_cache = options.document_cache.clone();
         inbox_opts.on_activity = options.on_activity.clone();
         inbox_opts.on_follow_response = options.on_follow_response.clone();
+        inbox_opts.signature_scheme = options.signature_scheme;
+        inbox_opts.ed25519 = ed25519.clone();
         let inbox = InboxProcessor::with_options(inbox_opts);
 
         let outbox = OutboxProcessor {
@@ -313,6 +343,8 @@ impl ActivityPubHandler {
             blocked_instances: options.blocked_instances.clone(),
             deliver: options.deliver.clone(),
             on_delivery_result: options.on_delivery_result.clone(),
+            signature_scheme: options.signature_scheme,
+            ed25519: ed25519.clone(),
         };
         let nodeinfo_stats = options.nodeinfo_stats.clone();
 
@@ -354,6 +386,7 @@ impl ActivityPubHandler {
             outbox,
             renderer: InteractionsRenderer::new(),
             nodeinfo_stats,
+            ed25519_public_key_pem,
         })
     }
 
@@ -438,6 +471,19 @@ impl ActivityPubHandler {
 
     /// Build the actor's JSON-LD document.
     pub fn get_actor_document(&self) -> Value {
+        let mut doc = self.base_actor_document();
+        if let Some(pem) = &self.ed25519_public_key_pem {
+            doc["additionalPublicKeys"] = json!([{
+                "id": ed25519_key_id(&self.actor_id),
+                "type": "Key",
+                "owner": self.actor_id,
+                "publicKeyPem": pem,
+            }]);
+        }
+        doc
+    }
+
+    fn base_actor_document(&self) -> Value {
         let actor = Actor {
             id: self.actor_id.clone(),
             actor_type: self.actor_type.clone(),
@@ -618,5 +664,105 @@ impl ActivityPubHandler {
     /// Render a list of interactions as HTML.
     pub fn render_interactions(&self, interactions: &[Interaction]) -> String {
         self.renderer.render_interactions(interactions, None)
+    }
+}
+
+#[cfg(test)]
+mod ed25519_actor_tests {
+    use super::*;
+    use crate::crypto::keys::{generate_ed25519_key, load_any_public_key, AnyPublicKey};
+    use crate::crypto::signatures::SignOptions;
+    use crate::crypto::{generate_rsa_keypair, sign_outgoing, Ed25519Identity};
+    use crate::storage::file::FileActivityPubStorage;
+
+    const ACTOR: &str = "https://yonder.example/ap/actor";
+
+    fn handler(ed25519: bool, scheme: SignatureScheme) -> (ActivityPubHandler, tempfile::TempDir) {
+        let dir = tempfile::TempDir::new().unwrap();
+        let storage = Arc::new(FileActivityPubStorage::new(dir.path(), true).unwrap());
+        let (rsa_key, _) = generate_rsa_keypair(1024).unwrap();
+        let options = HandlerOptions {
+            signature_scheme: scheme,
+            ed25519_key: ed25519.then(generate_ed25519_key),
+            ..HandlerOptions::default()
+        };
+        let handler = ActivityPubHandler::new(
+            storage,
+            ActorConfig::new("https://yonder.example"),
+            rsa_key,
+            options,
+        )
+        .unwrap();
+        (handler, dir)
+    }
+
+    #[test]
+    fn actor_document_advertises_ed25519_key_when_configured() {
+        let (with, _dir) = handler(true, SignatureScheme::Rfc9421);
+        let doc = with.get_actor_document();
+        let key = &doc["additionalPublicKeys"][0];
+        assert_eq!(key["id"], format!("{ACTOR}#ed25519-key"));
+        assert_eq!(key["owner"], ACTOR);
+        let loaded = load_any_public_key(key["publicKeyPem"].as_str().unwrap()).unwrap();
+        assert!(matches!(loaded, AnyPublicKey::Ed25519(_)));
+        // The RSA key stays the primary `publicKey`.
+        assert_eq!(doc["publicKey"]["id"], format!("{ACTOR}#main-key"));
+
+        let (without, _dir) = handler(false, SignatureScheme::Rfc9421);
+        assert!(without
+            .get_actor_document()
+            .get("additionalPublicKeys")
+            .is_none());
+    }
+
+    #[test]
+    fn rfc9421_prefers_ed25519_identity_and_draft_cavage_stays_rsa() {
+        let rsa_key = generate_rsa_keypair(1024).unwrap().0;
+        let identity = Ed25519Identity {
+            key_id: format!("{ACTOR}#ed25519-key"),
+            key: generate_ed25519_key(),
+        };
+        let opts = SignOptions::default();
+
+        let ed = sign_outgoing(
+            SignatureScheme::Rfc9421,
+            &rsa_key,
+            &format!("{ACTOR}#main-key"),
+            Some(&identity),
+            "GET",
+            "https://remote.example/ap/actor",
+            None,
+            &opts,
+        )
+        .unwrap();
+        assert!(ed["Signature-Input"].contains("alg=\"ed25519\""));
+        assert!(ed["Signature-Input"].contains("#ed25519-key"));
+
+        let cavage = sign_outgoing(
+            SignatureScheme::DraftCavage,
+            &rsa_key,
+            &format!("{ACTOR}#main-key"),
+            Some(&identity),
+            "GET",
+            "https://remote.example/ap/actor",
+            None,
+            &opts,
+        )
+        .unwrap();
+        assert!(cavage["Signature"].contains("#main-key"));
+        assert!(!cavage.contains_key("Signature-Input"));
+
+        let rsa_only = sign_outgoing(
+            SignatureScheme::Rfc9421,
+            &rsa_key,
+            &format!("{ACTOR}#main-key"),
+            None,
+            "GET",
+            "https://remote.example/ap/actor",
+            None,
+            &opts,
+        )
+        .unwrap();
+        assert!(rsa_only["Signature-Input"].contains("alg=\"rsa-v1_5-sha256\""));
     }
 }

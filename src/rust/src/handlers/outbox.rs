@@ -10,7 +10,8 @@ use chrono::Utc;
 use serde_json::{json, Value};
 
 use crate::cache::{self, DocumentCache};
-use crate::crypto::signatures::{sign_request, SignOptions};
+use crate::crypto::signatures::SignOptions;
+use crate::crypto::{sign_outgoing, Ed25519Identity, SignatureScheme};
 use crate::error::Result;
 use crate::http::HttpClient;
 use crate::model::{ap_context, Actor, Follower, Object, AS_PUBLIC};
@@ -71,6 +72,7 @@ pub fn collect_inboxes(followers: &[Follower]) -> Vec<String> {
 /// Network-level failures still surface as errors.
 ///
 /// :return: The HTTP response status code.
+#[allow(clippy::too_many_arguments)]
 pub fn deliver_activity(
     activity: &Value,
     inbox_url: &str,
@@ -78,22 +80,26 @@ pub fn deliver_activity(
     private_key: &rsa::RsaPrivateKey,
     user_agent: Option<&str>,
     client: &HttpClient,
+    scheme: SignatureScheme,
+    ed25519: Option<&Ed25519Identity>,
 ) -> Result<u16> {
     let body = serde_json::to_vec(activity)?;
     let content_type = "application/activity+json";
     let content_length = body.len().to_string();
 
-    let signed_headers: Vec<String> = [
-        "(request-target)",
-        "host",
-        "date",
-        "digest",
-        "content-type",
-        "content-length",
-    ]
-    .iter()
-    .map(|s| s.to_string())
-    .collect();
+    let signed_headers: Option<Vec<String>> = (scheme == SignatureScheme::DraftCavage).then(|| {
+        [
+            "(request-target)",
+            "host",
+            "date",
+            "digest",
+            "content-type",
+            "content-length",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+    });
 
     let opts = SignOptions {
         headers: [
@@ -102,9 +108,18 @@ pub fn deliver_activity(
         ]
         .into_iter()
         .collect(),
-        signed_headers: Some(&signed_headers),
+        signed_headers: signed_headers.as_deref(),
     };
-    let mut headers = sign_request(private_key, key_id, "POST", inbox_url, Some(&body), &opts)?;
+    let mut headers = sign_outgoing(
+        scheme,
+        private_key,
+        key_id,
+        ed25519,
+        "POST",
+        inbox_url,
+        Some(&body),
+        &opts,
+    )?;
     headers.insert("Content-Type".into(), content_type.into());
     headers.insert("Content-Length".into(), content_length);
     headers.insert(
@@ -402,6 +417,10 @@ pub struct OutboxProcessor {
     pub deliver: Option<DeliverFn>,
     /// Called after every delivery attempt (see [`OnDeliveryResult`]).
     pub on_delivery_result: Option<OnDeliveryResult>,
+    /// Wire format for outgoing signed requests.
+    pub signature_scheme: SignatureScheme,
+    /// Ed25519 identity for outgoing RFC 9421 requests.
+    pub ed25519: Option<Ed25519Identity>,
 }
 
 impl OutboxProcessor {
@@ -644,6 +663,8 @@ impl OutboxProcessor {
             user_agent: self.user_agent.clone(),
             http_client: self.http_client.clone(),
             on_delivery_result: self.on_delivery_result.clone(),
+            signature_scheme: self.signature_scheme,
+            ed25519: self.ed25519.clone(),
         }
     }
 
@@ -713,9 +734,11 @@ impl OutboxProcessor {
             headers: base_headers.clone(),
             signed_headers: None,
         };
-        let headers = match sign_request(
+        let headers = match sign_outgoing(
+            self.signature_scheme,
             &self.private_key,
             &self.key_id,
+            self.ed25519.as_ref(),
             "GET",
             actor_url,
             None,
@@ -793,6 +816,8 @@ pub struct DeliveryContext {
     user_agent: String,
     http_client: HttpClient,
     on_delivery_result: Option<OnDeliveryResult>,
+    signature_scheme: SignatureScheme,
+    ed25519: Option<Ed25519Identity>,
 }
 
 impl DeliveryContext {
@@ -821,6 +846,8 @@ impl DeliveryContext {
                 user_agent: self.user_agent.clone(),
                 http_client: self.http_client.clone(),
                 on_delivery_result: self.on_delivery_result.clone(),
+                signature_scheme: self.signature_scheme,
+                ed25519: self.ed25519.clone(),
             };
             let activity = activity.clone();
             handles.push(std::thread::spawn(move || loop {
@@ -921,6 +948,8 @@ impl DeliveryContext {
             &self.private_key,
             Some(&self.user_agent),
             &self.http_client,
+            self.signature_scheme,
+            self.ed25519.as_ref(),
         )
     }
 }

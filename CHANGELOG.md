@@ -2,6 +2,50 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- RFC 9421 HTTP Message Signatures (Rust SDK): `crypto::rfc9421` signs
+  requests with `rsa-v1_5-sha256` (`Signature-Input`, `Signature`,
+  `Content-Digest` for bodies) and verifies them, checking the covered
+  components, `created`/`expires` and the digest. Inbound verification
+  detects RFC 9421 requests from `Signature-Input` and accepts them on the
+  inbox, fetch-authorization and actor-fetch paths alongside draft-cavage.
+- `HandlerOptions.signature_scheme` / `ResolveInboxOptions.signature_scheme`
+  / `FollowResponseOptions.signature_scheme` and `crypto::sign_outgoing()`
+  select the outbound format (`SignatureScheme::DraftCavage` by default,
+  or `SignatureScheme::Rfc9421`).
+- RFC 9421 HTTP Message Signatures (Python SDK): `pubby.crypto` gains
+  `SignatureScheme`, `sign_request_rfc9421()`, `verify_request_rfc9421()`,
+  `parse_signatures_rfc9421()` and `build_content_digest()`, with the same
+  behaviour as the Rust SDK. `ActivityPubHandler`, `InboxProcessor`,
+  `OutboxProcessor`, `deliver_activity()` and `resolve_actor_inbox()` accept
+  a `signature_scheme` keyword (default `"draft-cavage"`, so existing callers
+  are unaffected). Inbound verification detects RFC 9421 requests in both SDKs.
+- Ed25519 (`alg="ed25519"`) RFC 9421 signatures in both SDKs: verification
+  accepts Ed25519 keys published as SPKI PEM (`publicKeyPem`), checking
+  `alg` against the key type. Signing with an Ed25519 key is available
+  through `sign_request_ed25519()` (Rust) and `sign_request_rfc9421()`
+  with an `Ed25519PrivateKey` (Python). Handlers keep their RSA key unless
+  an Ed25519 key is configured (see below).
+- Per-actor Ed25519 keys in both SDKs: `ed25519_private_key` (Python) and
+  `HandlerOptions.ed25519_key` (Rust) attach an Ed25519 key to an actor. It is
+  advertised in `additionalPublicKeys` (`<actor_id>#ed25519-key`), used to
+  sign RFC 9421 deliveries and actor fetches when `signature_scheme` is
+  `rfc9421`, and found by `keyId` on inbound verification (both `publicKey`
+  and `additionalPublicKeys` are searched). Draft-cavage stays RSA-only.
+  Python: `ActivityPubHandler`, `InboxProcessor`, `OutboxProcessor`,
+  `deliver_activity()` and `resolve_actor_inbox()` gain keyword arguments with
+  defaults, so existing callers are unaffected. Rust: `deliver_activity()`
+  takes an `ed25519` identity argument after `scheme`, and `sign_outgoing()`
+  takes an `ed25519` argument.
+
+### Changed
+
+- Rust: `handlers::outbox::deliver_activity()` takes a trailing
+  `scheme: SignatureScheme` argument.
+
 ## 0.6.13
 
 ### Fixed

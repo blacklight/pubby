@@ -11,6 +11,35 @@ use rsa::{RsaPrivateKey, RsaPublicKey};
 
 use crate::error::{ActivityPubError, Result};
 
+/// Generate a new Ed25519 signing key.
+pub fn generate_ed25519_key() -> ed25519_dalek::SigningKey {
+    let mut seed = [0u8; 32];
+    rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut seed);
+    ed25519_dalek::SigningKey::from_bytes(&seed)
+}
+
+/// Load an Ed25519 private key from PKCS#8 PEM data.
+pub fn load_ed25519_private_key(pem_data: impl AsRef<[u8]>) -> Result<ed25519_dalek::SigningKey> {
+    let pem = normalize_pem(&String::from_utf8_lossy(pem_data.as_ref()));
+    <ed25519_dalek::SigningKey as ed25519_dalek::pkcs8::DecodePrivateKey>::from_pkcs8_pem(&pem)
+        .map_err(|e| ActivityPubError::InvalidValue(format!("invalid Ed25519 private key: {e}")))
+}
+
+/// Export an Ed25519 private key as PKCS#8 PEM.
+pub fn export_ed25519_private_key_pem(key: &ed25519_dalek::SigningKey) -> Result<String> {
+    use ed25519_dalek::pkcs8::EncodePrivateKey;
+    key.to_pkcs8_pem(LineEnding::LF)
+        .map(|pem| pem.to_string())
+        .map_err(|e| ActivityPubError::InvalidValue(format!("Ed25519 key export failed: {e}")))
+}
+
+/// Export an Ed25519 public key as SPKI PEM (the `publicKeyPem` form).
+pub fn export_ed25519_public_key_pem(key: &ed25519_dalek::VerifyingKey) -> Result<String> {
+    use ed25519_dalek::pkcs8::EncodePublicKey;
+    key.to_public_key_pem(LineEnding::LF)
+        .map_err(|e| ActivityPubError::InvalidValue(format!("Ed25519 key export failed: {e}")))
+}
+
 /// Generate a new RSA key pair.
 ///
 /// :param key_size: RSA key size in bits (default 2048).
@@ -44,6 +73,28 @@ pub fn load_public_key(pem_data: impl AsRef<[u8]>) -> Result<RsaPublicKey> {
     RsaPublicKey::from_public_key_pem(&pem)
         .or_else(|_| RsaPublicKey::from_pkcs1_pem(&pem))
         .map_err(|e| ActivityPubError::InvalidValue(format!("invalid public key: {e}")))
+}
+
+/// A public key of a supported signature family.
+#[derive(Debug, Clone)]
+pub enum AnyPublicKey {
+    /// RSA — `rsa-v1_5-sha256` in RFC 9421, `rsa-sha256` in draft-cavage.
+    Rsa(RsaPublicKey),
+    /// Ed25519 (RFC 8032) — RFC 9421 `ed25519`.
+    Ed25519(ed25519_dalek::VerifyingKey),
+}
+
+/// Load an RSA or Ed25519 public key from SPKI PEM data.
+pub fn load_any_public_key(pem_data: impl AsRef<[u8]>) -> Result<AnyPublicKey> {
+    let pem = normalize_pem(&String::from_utf8_lossy(pem_data.as_ref()));
+    if let Ok(key) = load_public_key(&pem) {
+        return Ok(AnyPublicKey::Rsa(key));
+    }
+    <ed25519_dalek::VerifyingKey as ed25519_dalek::pkcs8::DecodePublicKey>::from_public_key_pem(
+        &pem,
+    )
+    .map(AnyPublicKey::Ed25519)
+    .map_err(|e| ActivityPubError::InvalidValue(format!("invalid public key: {e}")))
 }
 
 /// Normalize a PEM document for the strict RFC 7468 parser: line

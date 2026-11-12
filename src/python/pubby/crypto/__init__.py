@@ -2,19 +2,42 @@ from ._keys import (
     ensure_private_key_file,
     export_private_key_pem,
     export_public_key_pem,
+    generate_ed25519_private_key,
     generate_rsa_keypair,
+    load_any_public_key,
+    load_ed25519_private_key,
     load_private_key,
     load_public_key,
 )
-from ._signatures import sign_request, verify_request
+from ._signatures import (
+    Ed25519Identity,
+    SignatureScheme,
+    build_content_digest,
+    parse_signatures_rfc9421,
+    sign_request,
+    sign_request_rfc9421,
+    signing_identity,
+    verify_request,
+    verify_request_rfc9421,
+)
 
 __all__ = [
+    "Ed25519Identity",
+    "SignatureScheme",
+    "build_content_digest",
     "ensure_private_key_file",
     "export_private_key_pem",
     "export_public_key_pem",
+    "generate_ed25519_private_key",
     "generate_rsa_keypair",
+    "load_any_public_key",
+    "load_ed25519_private_key",
     "load_private_key",
     "load_public_key",
+    "parse_signatures_rfc9421",
     "sign_request",
+    "sign_request_rfc9421",
+    "signing_identity",
     "verify_request",
+    "verify_request_rfc9421",
 ]

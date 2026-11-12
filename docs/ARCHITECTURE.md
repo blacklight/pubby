@@ -284,8 +284,8 @@ Two internal modules, re-exported through `pubby.crypto.__init__`:
 
 | Module | Exposed API |
 |--------|-------------|
-| `_keys.py` | `generate_rsa_keypair()`, `load_private_key()`, `load_public_key()`, `export_private_key_pem()`, `export_public_key_pem()`, `ensure_private_key_file()` |
-| `_signatures.py` | `sign_request()`, `verify_request()` |
+| `_keys.py` | `generate_rsa_keypair()`, `load_private_key()`, `load_public_key()`, `load_any_public_key()`, `load_ed25519_private_key()`, `generate_ed25519_private_key()`, `export_private_key_pem()`, `export_public_key_pem()`, `ensure_private_key_file()` |
+| `_signatures.py` | `sign_request()`, `verify_request()`, `sign_request_rfc9421()`, `verify_request_rfc9421()`, `parse_signatures_rfc9421()`, `SignatureScheme` |
 
 **Key management** uses the `cryptography` library directly (RSA 2048-bit,
 PKCS#8 PEM).  No `httpsig` dependency.
@@ -296,6 +296,15 @@ with RSA-SHA256.  `sign_request()` returns a dict of headers (`Date`,
 `Digest`, `Host`, `Signature`) ready to merge into an outgoing request.
 `verify_request()` reconstructs the signing string, verifies the RSA
 signature, and optionally checks the `Digest` header.
+
+The Rust SDK (`crypto::rfc9421`) additionally implements
+[RFC 9421](https://www.rfc-editor.org/rfc/rfc9421) HTTP Message Signatures
+with `rsa-v1_5-sha256`: it covers the `@method`, `@authority`, `@path`
+derived components and `content-digest` (RFC 9530) for bodies, and sends
+`Signature-Input`/`Signature`. Outbound format is chosen by
+`SignatureScheme` (`DraftCavage` default, or `Rfc9421`); inbound requests
+are dispatched by the presence of `Signature-Input`, so both formats verify
+on every path.
 
 ### 9. Handlers — `pubby.handlers`
 

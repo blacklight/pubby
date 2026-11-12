@@ -45,6 +45,7 @@ futures = { version = "0.3", optional = true }
 futures-timer = { version = "3", optional = true }
 axum = { version = "0.8", optional = true }
 tower = { version = "0.5", optional = true }
+ed25519-dalek = { version = "2.2", features = ["pkcs8", "pem"] }
 
 [dev-dependencies]
 tempfile = "3"

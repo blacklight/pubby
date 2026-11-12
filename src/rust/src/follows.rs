@@ -55,6 +55,10 @@ pub struct FollowResponseOptions {
     pub user_agent: Option<String>,
     /// HTTP client for the synchronous delivery.
     pub http_client: Option<HttpClient>,
+    /// Wire format for the synchronous delivery's signature.
+    pub signature_scheme: crate::crypto::SignatureScheme,
+    /// Ed25519 identity for the synchronous delivery under RFC 9421.
+    pub ed25519: Option<crate::crypto::Ed25519Identity>,
 }
 
 fn deliver_response(
@@ -92,6 +96,8 @@ fn deliver_response(
         private_key,
         options.user_agent.as_deref(),
         &client,
+        options.signature_scheme,
+        options.ed25519.as_ref(),
     )?;
     Ok(())
 }
