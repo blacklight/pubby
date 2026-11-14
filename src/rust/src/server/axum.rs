@@ -104,9 +104,32 @@ async fn make_request(req: Request) -> std::result::Result<DispatchRequest, Box<
     })
 }
 
+/// Run a synchronous dispatch off the async executor when a tokio
+/// runtime is available (`dispatch`/`dispatch_multi` may perform
+/// blocking ureq fetches — on a runtime worker they must not occupy
+/// it). Without a tokio runtime (e.g. `futures::executor` in tests)
+/// the call runs inline, matching pre-0.6 behavior.
+async fn run_dispatch<T>(f: impl FnOnce() -> T + Send + 'static) -> T
+where
+    T: Send + 'static,
+{
+    if tokio::runtime::Handle::try_current().is_err() {
+        return f();
+    }
+    match tokio::task::spawn_blocking(f).await {
+        Ok(v) => v,
+        Err(e) => std::panic::resume_unwind(e.into_panic()),
+    }
+}
+
 async fn serve_req(State(s): State<ApState>, req: Request) -> Response {
     let resp = match make_request(req).await {
-        Ok(dreq) => dispatch(&s.handler, &dreq, &s.prefix, &s.options),
+        Ok(dreq) => {
+            let handler = s.handler.clone();
+            let prefix = s.prefix.clone();
+            let options = s.options.clone();
+            run_dispatch(move || dispatch(&handler, &dreq, &prefix, &options)).await
+        }
         Err(e) => return *e,
     };
     into_response(resp)
@@ -191,7 +214,12 @@ struct ApMultiState {
 
 async fn serve_req_multi(State(s): State<ApMultiState>, req: Request) -> Response {
     let resp = match make_request(req).await {
-        Ok(dreq) => super::dispatch_multi(&s.multi, &dreq, &s.prefix, &s.options),
+        Ok(dreq) => {
+            let multi = s.multi.clone();
+            let prefix = s.prefix.clone();
+            let options = s.options.clone();
+            run_dispatch(move || super::dispatch_multi(&multi, &dreq, &prefix, &options)).await
+        }
         Err(e) => return *e,
     };
     into_response(resp)

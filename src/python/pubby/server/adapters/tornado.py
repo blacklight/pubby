@@ -8,6 +8,7 @@ import json
 from typing import Callable, Optional, List, Tuple, Any
 
 import tornado.web
+from tornado.ioloop import IOLoop
 
 from ... import cache as _cache
 from ...handlers import ActivityPubHandler
@@ -45,11 +46,22 @@ class BaseActivityPubHandler(tornado.web.RequestHandler):
         self.set_header("Content-Type", content_type)
         self.write(json.dumps(data))
 
-    def serve_document(self, key, render, media_type=ACTIVITY_JSON):
+    async def blocking(self, fn, *args, **kwargs):
+        """
+        Run a blocking callable on the default executor.
+
+        Handler work (storage I/O, remote fetches via ``requests``) is
+        synchronous; running it inline would stall the IOLoop for every
+        connection on the process.
+        """
+        loop = IOLoop.current()
+        return await loop.run_in_executor(None, lambda: fn(*args, **kwargs))
+
+    async def serve_document(self, key, render, media_type=ACTIVITY_JSON):
         """Serve a dereference document through the shared document cache."""
         cache = self.document_cache
         if cache is None:
-            doc = render()
+            doc = await self.blocking(render)
             if doc is None:
                 self.set_status(404)
                 self.write_json({"error": "not found"})
@@ -63,7 +75,7 @@ class BaseActivityPubHandler(tornado.web.RequestHandler):
                 return None
             return _cache.CachedResponse.document(doc, media_type)
 
-        cached = cache.get_or_render(key, _render)
+        cached = await self.blocking(cache.get_or_render, key, _render)
         if cached is None:
             self.set_status(404)
             self.write_json({"error": "not found"})
@@ -104,7 +116,7 @@ class BaseActivityPubHandler(tornado.web.RequestHandler):
 class WebFingerHandler(BaseActivityPubHandler):
     """Handle WebFinger requests."""
 
-    def get(self):
+    async def get(self):
         resource = self.get_argument("resource", None)
         if not resource:
             self.set_status(400)
@@ -118,7 +130,7 @@ class WebFingerHandler(BaseActivityPubHandler):
             self.write_json({"error": "not found"})
             return
 
-        self.serve_document(
+        await self.serve_document(
             _cache.webfinger_key(resource),
             lambda: self.ap_handler.get_webfinger_response(resource),
             JRD_JSON,
@@ -128,8 +140,8 @@ class WebFingerHandler(BaseActivityPubHandler):
 class NodeInfoDiscoveryHandler(BaseActivityPubHandler):
     """Handle NodeInfo discovery requests."""
 
-    def get(self):
-        self.serve_document(
+    async def get(self):
+        await self.serve_document(
             _cache.nodeinfo_discovery_key(),
             self.ap_handler.get_nodeinfo_discovery,
             "application/json",
@@ -139,8 +151,8 @@ class NodeInfoDiscoveryHandler(BaseActivityPubHandler):
 class NodeInfoHandler(BaseActivityPubHandler):
     """Handle NodeInfo document requests."""
 
-    def get(self):
-        self.serve_document(
+    async def get(self):
+        await self.serve_document(
             _cache.nodeinfo_key(),
             self.ap_handler.get_nodeinfo_document,
             "application/json",
@@ -150,8 +162,8 @@ class NodeInfoHandler(BaseActivityPubHandler):
 class ActorHandler(BaseActivityPubHandler):
     """Handle actor profile requests."""
 
-    def get(self):
-        self.serve_document(
+    async def get(self):
+        await self.serve_document(
             _cache.actor_document_key(), self.ap_handler.get_actor_document
         )
 
@@ -159,7 +171,7 @@ class ActorHandler(BaseActivityPubHandler):
 class InboxHandler(BaseActivityPubHandler):
     """Handle inbox POST requests."""
 
-    def post(self):
+    async def post(self):
         # Rate limiting
         if self.rate_limiter is not None:
             try:
@@ -181,7 +193,8 @@ class InboxHandler(BaseActivityPubHandler):
         headers = dict(self.request.headers)
 
         try:
-            self.ap_handler.process_inbox_activity(
+            await self.blocking(
+                self.ap_handler.process_inbox_activity,
                 activity_data,
                 method="POST",
                 path=self.request.path,
@@ -204,10 +217,10 @@ class InboxHandler(BaseActivityPubHandler):
 class OutboxHandler(BaseActivityPubHandler):
     """Handle outbox GET requests."""
 
-    def get(self):
+    async def get(self):
         limit = int(self.get_argument("limit", 20))
         offset = int(self.get_argument("offset", 0))
-        self.serve_document(
+        await self.serve_document(
             _cache.outbox_key(limit, offset),
             lambda: self.ap_handler.get_outbox(limit=limit, offset=offset),
         )
@@ -216,8 +229,8 @@ class OutboxHandler(BaseActivityPubHandler):
 class FollowersHandler(BaseActivityPubHandler):
     """Handle followers collection requests."""
 
-    def get(self):
-        self.serve_document(
+    async def get(self):
+        await self.serve_document(
             _cache.followers_key(), self.ap_handler.get_followers_collection
         )
 
@@ -225,8 +238,8 @@ class FollowersHandler(BaseActivityPubHandler):
 class FollowingHandler(BaseActivityPubHandler):
     """Handle following collection requests."""
 
-    def get(self):
-        self.serve_document(
+    async def get(self):
+        await self.serve_document(
             _cache.following_key(), self.ap_handler.get_following_collection
         )
 
@@ -234,9 +247,9 @@ class FollowingHandler(BaseActivityPubHandler):
 class QuoteAuthorizationHandler(BaseActivityPubHandler):
     """Handle GET requests for QuoteAuthorization objects."""
 
-    def get(self, auth_id):
+    async def get(self, auth_id):
         full_id = f"{self.ap_handler.actor_id}/quote_authorizations/{auth_id}"
-        self.serve_document(
+        await self.serve_document(
             _cache.quote_authorization_key(full_id),
             lambda: self.ap_handler.get_quote_authorization(full_id),
         )

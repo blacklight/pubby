@@ -8,6 +8,7 @@ import json
 from typing import Any, List, Tuple
 
 import tornado.web
+from tornado.ioloop import IOLoop
 
 from ...handlers import ActivityPubHandler
 from ..mastodon._routes import MastodonAPI
@@ -26,51 +27,63 @@ class BaseMastodonHandler(tornado.web.RequestHandler):
         self.set_header("Content-Type", "application/json")
         self.write(json.dumps(data))
 
+    async def blocking(self, fn, *args, **kwargs):
+        """Run a blocking callable on the default executor.
+
+        The API reads storage synchronously; running it inline would
+        stall the IOLoop for every connection on the process.
+        """
+        loop = IOLoop.current()
+        return await loop.run_in_executor(None, lambda: fn(*args, **kwargs))
+
 
 class InstanceV1Handler(BaseMastodonHandler):
-    def get(self):
-        body, status = self.api.instance_v1()
+    async def get(self):
+        body, status = await self.blocking(self.api.instance_v1)
         self.write_json(body, status)
 
 
 class InstanceV2Handler(BaseMastodonHandler):
-    def get(self):
-        body, status = self.api.instance_v2()
+    async def get(self):
+        body, status = await self.blocking(self.api.instance_v2)
         self.write_json(body, status)
 
 
 class InstancePeersHandler(BaseMastodonHandler):
-    def get(self):
-        body, status = self.api.instance_peers()
+    async def get(self):
+        body, status = await self.blocking(self.api.instance_peers)
         self.write_json(body, status)
 
 
 class NodeInfo20Handler(BaseMastodonHandler):
-    def get(self):
-        self.write_json(self.ap_handler.get_nodeinfo_document())
+    async def get(self):
+        doc = await self.blocking(self.ap_handler.get_nodeinfo_document)
+        self.write_json(doc)
 
 
 class NodeInfo21JsonHandler(BaseMastodonHandler):
-    def get(self):
-        self.write_json(self.ap_handler.get_nodeinfo_document())
+    async def get(self):
+        doc = await self.blocking(self.ap_handler.get_nodeinfo_document)
+        self.write_json(doc)
 
 
 class AccountsLookupHandler(BaseMastodonHandler):
-    def get(self):
+    async def get(self):
         acct = self.get_argument("acct", None)
-        body, status = self.api.accounts_lookup(acct)
+        body, status = await self.blocking(self.api.accounts_lookup, acct)
         self.write_json(body, status)
 
 
 class AccountsGetHandler(BaseMastodonHandler):
-    def get(self, account_id):
-        body, status = self.api.accounts_get(account_id)
+    async def get(self, account_id):
+        body, status = await self.blocking(self.api.accounts_get, account_id)
         self.write_json(body, status)
 
 
 class AccountsStatusesHandler(BaseMastodonHandler):
-    def get(self, account_id):
-        body, status = self.api.accounts_statuses(
+    async def get(self, account_id):
+        body, status = await self.blocking(
+            self.api.accounts_statuses,
             account_id,
             limit=int(self.get_argument("limit", "20")),
             max_id=self.get_argument("max_id", None),
@@ -86,8 +99,9 @@ class AccountsStatusesHandler(BaseMastodonHandler):
 
 
 class AccountsFollowersHandler(BaseMastodonHandler):
-    def get(self, account_id):
-        body, status = self.api.accounts_followers(
+    async def get(self, account_id):
+        body, status = await self.blocking(
+            self.api.accounts_followers,
             account_id,
             limit=int(self.get_argument("limit", "40")),
             max_id=self.get_argument("max_id", None),
@@ -97,8 +111,8 @@ class AccountsFollowersHandler(BaseMastodonHandler):
 
 
 class StatusesGetHandler(BaseMastodonHandler):
-    def get(self, status_id):
-        body, status = self.api.statuses_get(status_id)
+    async def get(self, status_id):
+        body, status = await self.blocking(self.api.statuses_get, status_id)
         self.write_json(body, status)
 
 

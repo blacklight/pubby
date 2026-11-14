@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- Rust SDK (axum adapter): `dispatch`/`dispatch_multi` are synchronous and
+  may perform blocking `ureq` fetches; the axum routes now run them on the
+  tokio blocking pool (`spawn_blocking`) instead of occupying a runtime
+  worker thread, which could starve the runtime under concurrent remote
+  fetches. Calls fall back to inline execution when no tokio runtime is
+  present (e.g. `futures::executor` in tests).
+- Python SDK (Tornado adapters): handlers ran the synchronous
+  `ActivityPubHandler`/storage work directly on the IOLoop thread, stalling
+  every connection during remote fetches. Handler bodies now offload
+  blocking work to the default executor via `run_in_executor`.
+
 ## 0.6.14
 
 ### Added

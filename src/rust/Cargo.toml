@@ -19,7 +19,7 @@ redis = ["dep:redis"]
 # Async single-flight support for DocumentCache (get_or_render_async)
 async = ["dep:futures", "dep:futures-timer"]
 # axum web-framework adapter
-axum = ["dep:axum", "dep:tower"]
+axum = ["dep:axum", "dep:tower", "dep:tokio"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -44,6 +44,7 @@ redis = { version = "0.27", optional = true }
 futures = { version = "0.3", optional = true }
 futures-timer = { version = "3", optional = true }
 axum = { version = "0.8", optional = true }
+tokio = { version = "1", features = ["rt"], optional = true }
 tower = { version = "0.5", optional = true }
 ed25519-dalek = { version = "2.2", features = ["pkcs8", "pem"] }
 
