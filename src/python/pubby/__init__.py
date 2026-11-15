@@ -83,7 +83,7 @@ from .quotes import (
 from .storage import ActivityPubStorage
 from .webfinger import Mention, extract_mentions, resolve_actor_url
 
-__version__ = "0.6.17"
+__version__ = "0.6.18"
 
 __all__ = [
     "Activity",
