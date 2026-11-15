@@ -2222,6 +2222,38 @@ class TestSignatureVerification:
 
         mock_storage.store_interaction.assert_not_called()
 
+    def test_key_id_pointing_at_key_document(
+        self, inbox_processor, mock_storage, rsa_keypair
+    ):
+        """tags.pub style: ``keyId`` is the CryptographicKey document URL
+        itself (no ``#fragment``), so the fetched "actor" is the key doc."""
+        private_key, public_key = rsa_keypair
+        pem = export_public_key_pem(public_key)
+        key_doc_url = f"{self.ACTOR}/publickey"
+        docs = {
+            key_doc_url: {
+                "id": key_doc_url,
+                "type": "CryptographicKey",
+                "owner": self.ACTOR,
+                "publicKeyPem": pem,
+            },
+            self.ACTOR: self._actor_doc(self.ACTOR, pem, key_doc_url),
+        }
+        activity = self._like(self.ACTOR)
+        headers, body = self._signed(private_key, key_doc_url, activity)
+
+        with self._patch_fetch(inbox_processor, docs):
+            inbox_processor.process(
+                activity,
+                path=self.INBOX_PATH,
+                headers=headers,
+                body=body,
+            )
+
+        mock_storage.store_interaction.assert_called_once()
+        interaction = mock_storage.store_interaction.call_args[0][0]
+        assert interaction.source_actor_id == self.ACTOR
+
     def test_verify_signature_returns_key_owner(self, inbox_processor, rsa_keypair):
         """verify_signature returns the keyId owner when it is the actor."""
         private_key, public_key = rsa_keypair

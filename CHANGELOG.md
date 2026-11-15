@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- Inbound HTTP signature verification now accepts `keyId` values that
+  point at a standalone `CryptographicKey` document (e.g. tags.pub's
+  `…/publickey` URLs) instead of `actor#main-key`. The fetched document's
+  top-level `publicKeyPem` is used directly; actor binding is still
+  enforced by requiring the claimed actor's document to advertise the
+  `keyId`.
+
 ## 0.6.17
 
 ### Fixed

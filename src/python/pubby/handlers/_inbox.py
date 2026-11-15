@@ -70,12 +70,32 @@ def _advertised_keys(actor: dict) -> list[dict]:
     return keys
 
 
+def _key_document_pem(doc: dict) -> str:
+    """
+    PEM of a standalone key document: some software (e.g. tags.pub) uses
+    the ``CryptographicKey`` document URL itself as ``keyId``, so the
+    fetched "actor" is the key — a top-level ``publicKeyPem`` plus
+    ``owner``, with no ``publicKey``/``additionalPublicKeys`` wrapper.
+    """
+    key_types = {"CryptographicKey", "Key"}
+    doc_type = doc.get("type")
+    types = doc_type if isinstance(doc_type, list) else [doc_type]
+    is_key_doc = "owner" in doc or any(t in key_types for t in types)
+    if not is_key_doc:
+        return ""
+    pem = doc.get("publicKeyPem")
+    return pem if isinstance(pem, str) and pem else ""
+
+
 def _public_key_pem_for(actor: dict, key_id: str) -> str:
     """
     The PEM of the advertised key whose ``id`` is ``key_id``. Falls back to
     the first ``publicKey`` entry when no id matches, which keeps actors
     whose key ids differ from their ``keyId`` working.
     """
+    pem = _key_document_pem(actor)
+    if pem:
+        return pem
     keys = _advertised_keys(actor)
     match = next((k for k in keys if k.get("id") == key_id), None)
     if match is None and keys:

@@ -42,10 +42,36 @@ fn advertised_keys(actor: &Value) -> Vec<&Value> {
     keys
 }
 
+/// PEM of a standalone key document: some software (e.g. tags.pub) uses
+/// the `CryptographicKey` document URL itself as `keyId`, so the fetched
+/// "actor" is the key — a top-level `publicKeyPem` plus `owner`, with no
+/// `publicKey`/`additionalPublicKeys` wrapper.
+fn key_document_pem(doc: &Value) -> Option<String> {
+    let is_key_type = |t: &Value| {
+        t.as_str()
+            .is_some_and(|s| s == "CryptographicKey" || s == "Key")
+    };
+    let is_key_doc = doc.get("owner").is_some()
+        || doc.get("type").is_some_and(|t| match t {
+            Value::Array(types) => types.iter().any(is_key_type),
+            t => is_key_type(t),
+        });
+    if !is_key_doc {
+        return None;
+    }
+    doc.get("publicKeyPem")
+        .and_then(Value::as_str)
+        .filter(|pem| !pem.is_empty())
+        .map(String::from)
+}
+
 /// The PEM of the advertised key whose `id` is `key_id`. Falls back to the
 /// first `publicKey` entry when no id matches, which keeps actors whose
 /// key ids differ from their `keyId` working.
 fn public_key_pem_for(actor: &Value, key_id: &str) -> Option<String> {
+    if let Some(pem) = key_document_pem(actor) {
+        return Some(pem);
+    }
     let keys = advertised_keys(actor);
     keys.iter()
         .find(|k| k.get("id").and_then(Value::as_str) == Some(key_id))
@@ -1435,5 +1461,70 @@ mod tests {
                 .unwrap(),
             ACTOR
         );
+    }
+    #[test]
+    fn verifies_key_id_pointing_at_key_document() {
+        // tags.pub style: `keyId` is the CryptographicKey document URL
+        // itself (no `#fragment`), so the fetched "actor" is the key doc.
+        let dir = tempfile::tempdir().unwrap();
+        let storage: Arc<dyn ActivityPubStorage> =
+            Arc::new(FileActivityPubStorage::new(dir.path(), true).unwrap());
+        let (remote_key, remote_public) = generate_rsa_keypair(1024).unwrap();
+        let pem = export_public_key_pem(&remote_public).unwrap();
+        let key_doc_url = "https://remote.example/ap/actor/publickey";
+        storage
+            .cache_remote_actor(
+                key_doc_url,
+                &json!({
+                    "id": key_doc_url,
+                    "type": "CryptographicKey",
+                    "owner": ACTOR,
+                    "publicKeyPem": pem,
+                }),
+                None,
+            )
+            .unwrap();
+        storage
+            .cache_remote_actor(
+                ACTOR,
+                &json!({
+                    "id": ACTOR,
+                    "publicKey": {"id": key_doc_url, "publicKeyPem": pem},
+                }),
+                None,
+            )
+            .unwrap();
+        let (local_key, _) = generate_rsa_keypair(1024).unwrap();
+        let inbox = InboxProcessor::with_options(InboxOptions::new(
+            storage.clone(),
+            "https://yonder.example/ap/actor",
+            local_key,
+            "https://yonder.example/ap/actor#main-key",
+        ));
+
+        for scheme in [SignatureScheme::DraftCavage, SignatureScheme::Rfc9421] {
+            let mut headers = sign_outgoing(
+                scheme,
+                &remote_key,
+                key_doc_url,
+                None,
+                "POST",
+                INBOX,
+                Some(BODY),
+                &SignOptions::default(),
+            )
+            .unwrap();
+            headers.insert("Host".into(), "yonder.example".into());
+
+            inbox
+                .verify_signature("POST", "/ap/inbox", &headers, Some(BODY), Some(ACTOR))
+                .unwrap_or_else(|e| panic!("{scheme:?} rejected key-document keyId: {e}"));
+            assert!(
+                inbox
+                    .verify_signature("POST", "/ap/inbox", &headers, Some(b"{}"), Some(ACTOR))
+                    .is_err(),
+                "{scheme:?} accepted a tampered body"
+            );
+        }
     }
 }
