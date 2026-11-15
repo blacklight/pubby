@@ -28,7 +28,9 @@ def extract_actor_inbox(actor_data: dict) -> str | None:
     """
     Return the preferred inbox URL from an actor document.
 
-    Prefers ``endpoints.sharedInbox`` over ``inbox``.
+    Prefers ``inbox`` over ``endpoints.sharedInbox``: the actor inbox is
+    the required endpoint, while the shared inbox is an optional
+    optimization that some implementations only partially support.
 
     :param actor_data: The actor's JSON-LD document.
     :return: The inbox URL, or ``None`` if no inbox is present.
@@ -36,15 +38,15 @@ def extract_actor_inbox(actor_data: dict) -> str | None:
     if not isinstance(actor_data, dict):
         return None
 
+    inbox = actor_data.get("inbox")
+    if inbox:
+        return inbox
+
     endpoints = actor_data.get("endpoints") or {}
     if not isinstance(endpoints, dict):
         endpoints = {}
 
-    shared_inbox = endpoints.get("sharedInbox")
-    if shared_inbox:
-        return shared_inbox
-
-    return actor_data.get("inbox") or None
+    return endpoints.get("sharedInbox") or None
 
 
 def _load_private_key(
@@ -84,7 +86,7 @@ def resolve_actor_inbox(
       application/ld+json`` on cache miss.
     - Signs the GET when both ``private_key`` and ``key_id`` are provided.
     - Caches successful fetches via ``storage.cache_remote_actor``.
-    - Returns ``endpoints.sharedInbox`` when available, otherwise ``inbox``.
+    - Returns ``inbox`` when available, otherwise ``endpoints.sharedInbox``.
 
     :param actor_url: The remote actor URL/ID.
     :param storage: An ``ActivityPubStorage`` backend (used for actor cache).

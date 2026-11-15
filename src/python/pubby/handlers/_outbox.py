@@ -1135,8 +1135,10 @@ class OutboxProcessor:
                 continue
 
             actor = Actor.build(actor_data)
-            # Prefer shared inbox to reduce delivery requests
-            inbox = actor.endpoints.get("sharedInbox") or actor.inbox
+            # Prefer the actor inbox: `inbox` is the required endpoint
+            # while `sharedInbox` is an optional optimization that some
+            # implementations only partially support.
+            inbox = actor.inbox or actor.endpoints.get("sharedInbox") or ""
             logger.debug(
                 "Actor %s resolved to inbox %s",
                 actor_url,

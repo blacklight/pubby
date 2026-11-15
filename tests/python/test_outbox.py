@@ -821,8 +821,8 @@ class TestMentionDelivery:
         inboxes = outbox_processor._collect_recipient_inboxes(activity)
 
         assert len(inboxes) == 1
-        # Should prefer shared inbox
-        assert "https://mastodon.social/inbox" in inboxes
+        # Should prefer the actor inbox over the shared inbox
+        assert "https://mastodon.social/users/alice/inbox" in inboxes
         mock_requests.get.assert_called_once()
 
     @patch("pubby.handlers._outbox.requests")

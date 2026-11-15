@@ -791,19 +791,34 @@ impl OutboxProcessor {
                 continue;
             };
             let actor = Actor::from_json(&actor_data);
-            let inbox = actor
-                .endpoints
-                .get("sharedInbox")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty())
-                .map(String::from)
-                .unwrap_or(actor.inbox);
+            let inbox = recipient_inbox(&actor);
             if !inbox.is_empty() && seen.insert(inbox.clone()) {
                 inboxes.push(inbox);
             }
         }
         inboxes
     }
+}
+
+/// Pick the delivery inbox for a directly-addressed actor.
+///
+/// `inbox` is the required ActivityPub endpoint; `endpoints.sharedInbox`
+/// is an optional optimization that some implementations only partially
+/// support — e.g. they silently drop `Follow`/`Undo` delivered to the
+/// shared inbox (bird.makeup). Directed activities therefore prefer the
+/// actor inbox, falling back to the shared one when absent. This mirrors
+/// `deliver_response` in `follows.rs`, which already prefers `inbox`.
+fn recipient_inbox(actor: &Actor) -> String {
+    if !actor.inbox.is_empty() {
+        return actor.inbox.clone();
+    }
+    actor
+        .endpoints
+        .get("sharedInbox")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_default()
+        .to_string()
 }
 
 /// Detachable delivery context used for `async_delivery` fan-out.
@@ -995,4 +1010,39 @@ pub fn get_outbox_collection_for_actor(
         "totalItems": activities.len(),
         "orderedItems": activities,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn actor(inbox: &str, shared_inbox: Option<&str>) -> Actor {
+        let mut a = Actor::default();
+        a.inbox = inbox.to_string();
+        if let Some(s) = shared_inbox {
+            a.endpoints.insert("sharedInbox".to_string(), json!(s));
+        }
+        a
+    }
+
+    #[test]
+    fn recipient_inbox_prefers_actor_inbox() {
+        // `inbox` is the required endpoint; `sharedInbox` is only an
+        // optional optimization and must not win for directed delivery.
+        let a = actor(
+            "https://bird.makeup/users/x/inbox",
+            Some("https://bird.makeup/inbox"),
+        );
+        assert_eq!(recipient_inbox(&a), "https://bird.makeup/users/x/inbox");
+    }
+
+    #[test]
+    fn recipient_inbox_falls_back_to_shared() {
+        let a = actor("", Some("https://e.com/inbox"));
+        assert_eq!(recipient_inbox(&a), "https://e.com/inbox");
+        let b = actor("", None);
+        assert_eq!(recipient_inbox(&b), "");
+        let c = actor("https://e.com/u/inbox", Some(""));
+        assert_eq!(recipient_inbox(&c), "https://e.com/u/inbox");
+    }
 }

@@ -1532,7 +1532,7 @@ inbox = resolve_actor_inbox(
 - Signs the GET when both `private_key` and `key_id` are provided; accepts an
   `RSAPrivateKey` object or a PEM string/bytes.
 - Filters blocked/non-allowed instances before making a network call.
-- Returns `endpoints.sharedInbox` when available, otherwise `inbox`.
+- Returns `inbox` when available, otherwise `endpoints.sharedInbox`.
 
 #### `extract_actor_inbox(actor_data) -> str | None`
 

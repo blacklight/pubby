@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Changed
+
+- Directed deliveries (activities addressed to specific actors via
+  `to`/`cc`, and the `client` inbox-resolution helpers) now prefer the
+  actor's required `inbox` endpoint over the optional
+  `endpoints.sharedInbox`. Some implementations only partially support
+  their shared inbox — e.g. BirdsiteLive (bird.makeup) silently drops
+  `Follow`/`Undo` delivered there. Follower fan-out still prefers shared
+  inboxes to keep delivery volume low.
+
 ## 0.6.15
 
 ### Fixed

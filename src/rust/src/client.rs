@@ -11,23 +11,24 @@ use crate::storage::ActivityPubStorage;
 
 /// Return the preferred inbox URL from an actor document.
 ///
-/// Prefers `endpoints.sharedInbox` over `inbox`.
+/// Prefers `inbox` over `endpoints.sharedInbox`: the actor inbox is the
+/// required endpoint, while the shared inbox is an optional optimization
+/// that some implementations only partially support.
 pub fn extract_actor_inbox(actor_data: &Value) -> Option<String> {
     let map = actor_data.as_object()?;
-    let shared = map
-        .get("endpoints")
+    if let Some(inbox) = map
+        .get("inbox")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+    {
+        return Some(inbox.to_string());
+    }
+    map.get("endpoints")
         .and_then(|e| e.as_object())
         .and_then(|e| e.get("sharedInbox"))
         .and_then(|v| v.as_str())
-        .filter(|s| !s.is_empty());
-    match shared {
-        Some(s) => Some(s.to_string()),
-        None => map
-            .get("inbox")
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-            .map(String::from),
-    }
+        .filter(|s| !s.is_empty())
+        .map(String::from)
 }
 
 /// Options for [`resolve_actor_inbox`].
@@ -59,7 +60,7 @@ pub struct ResolveInboxOptions<'a> {
 /// - Fetches the actor document with `Accept: application/activity+json`
 ///   on cache miss; signs the GET when `key_id` and `private_key` are set.
 /// - Caches successful fetches via `storage.cache_remote_actor`.
-/// - Returns `endpoints.sharedInbox` when available, otherwise `inbox`.
+/// - Returns `inbox` when available, otherwise `endpoints.sharedInbox`.
 pub fn resolve_actor_inbox(
     actor_url: &str,
     storage: &dyn ActivityPubStorage,

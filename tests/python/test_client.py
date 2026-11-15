@@ -22,10 +22,19 @@ def _make_mock_response(data=None, status_code=200, json_error=None):
 
 
 class TestExtractActorInbox:
-    def test_prefers_shared_inbox(self):
+    def test_prefers_actor_inbox(self):
         actor = {
             "id": "https://remote.example.com/users/alice",
             "inbox": "https://remote.example.com/users/alice/inbox",
+            "endpoints": {"sharedInbox": "https://remote.example.com/inbox"},
+        }
+        assert (
+            extract_actor_inbox(actor) == "https://remote.example.com/users/alice/inbox"
+        )
+
+    def test_falls_back_to_shared_inbox(self):
+        actor = {
+            "id": "https://remote.example.com/users/alice",
             "endpoints": {"sharedInbox": "https://remote.example.com/inbox"},
         }
         assert extract_actor_inbox(actor) == "https://remote.example.com/inbox"
@@ -76,7 +85,7 @@ class TestResolveActorInbox:
         )
         storage.cache_remote_actor.assert_not_called()
 
-    def test_cached_actor_uses_shared_inbox(self, storage):
+    def test_cached_actor_prefers_inbox(self, storage):
         storage.get_cached_actor.return_value = {
             "id": "https://remote.example.com/users/alice",
             "inbox": "https://remote.example.com/users/alice/inbox",
@@ -88,7 +97,7 @@ class TestResolveActorInbox:
             storage,
         )
 
-        assert inbox == "https://remote.example.com/inbox"
+        assert inbox == "https://remote.example.com/users/alice/inbox"
 
     @patch("pubby.client.requests")
     def test_fetch_signs_and_caches(self, mock_requests, storage, private_key):
@@ -111,7 +120,7 @@ class TestResolveActorInbox:
             key_id="https://blog.example.com/ap/actor#main-key",
         )
 
-        assert inbox == "https://remote.example.com/inbox"
+        assert inbox == "https://remote.example.com/users/alice/inbox"
         storage.cache_remote_actor.assert_called_once()
         mock_requests.get.assert_called_once()
 
