@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- Rust SDK: PEM loading now re-wraps base64 bodies to 64 columns before
+  parsing. `publicKeyPem` documents with non-canonical wrapping — e.g.
+  BirdsiteLive's 72-column keys — no longer fail inbound signature
+  verification.
+
 ## 0.6.16
 
 ### Changed

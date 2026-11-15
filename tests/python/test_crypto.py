@@ -77,6 +77,17 @@ class TestKeyExportAndLoad:
             loaded = load_public_key(variant)
             assert export_public_key_pem(loaded) == pem
 
+    def test_load_public_key_tolerates_wide_base64_lines(self, rsa_keypair):
+        _, public_key = rsa_keypair
+        pem = export_public_key_pem(public_key)
+        lines = pem.splitlines()
+        body = "".join(line for line in lines if not line.startswith("-----"))
+        wrapped = "\n".join(body[i : i + 72] for i in range(0, len(body), 72))
+        wide = f"{lines[0]}\n{wrapped}\n{lines[-1]}\n"
+
+        loaded = load_public_key(wide)
+        assert export_public_key_pem(loaded) == pem
+
     def test_load_private_key_from_bytes(self, rsa_keypair):
         private_key, _ = rsa_keypair
         pem = export_private_key_pem(private_key)

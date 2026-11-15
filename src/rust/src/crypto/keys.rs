@@ -98,24 +98,85 @@ pub fn load_any_public_key(pem_data: impl AsRef<[u8]>) -> Result<AnyPublicKey> {
 }
 
 /// Normalize a PEM document for the strict RFC 7468 parser: line
-/// endings become LF and everything outside the first
-/// `BEGIN`/`END` encapsulation block is dropped. Some fediverse
-/// software ships `publicKeyPem` values the strict parser rejects —
-/// e.g. Akkoma appends a trailing blank line.
+/// endings become LF, everything outside the first `BEGIN`/`END`
+/// encapsulation block is dropped, and the base64 body is re-wrapped
+/// to 64 columns. Some fediverse software ships `publicKeyPem` values
+/// the strict parser rejects — e.g. Akkoma appends a trailing blank
+/// line and BirdsiteLive emits 72-column base64.
 fn normalize_pem(pem: &str) -> String {
     let pem = pem.replace("\r\n", "\n").replace('\r', "\n");
     let Some(begin) = pem.find("-----BEGIN ") else {
         return pem.trim().to_string();
     };
     let block = &pem[begin..];
-    match block.find("-----END ") {
-        Some(i) => {
-            let tail = &block[i..];
-            let end = tail.find('\n').map(|n| i + n).unwrap_or(block.len());
-            format!("{}\n", block[..end].trim_end())
+    let Some(end) = block.find("-----END ") else {
+        return block.trim_end().to_string();
+    };
+    let tail = &block[end..];
+    let block_end = end + tail.find('\n').map(|n| n + 1).unwrap_or(tail.len());
+    canonicalize_pem_block(&block[..block_end])
+}
+
+/// Rebuild one `BEGIN`/`END` encapsulation with canonical 64-column
+/// base64. PEM headers (e.g. `Proc-Type`/`DEK-Info` on legacy
+/// encrypted keys) are preserved ahead of the body.
+fn canonicalize_pem_block(block: &str) -> String {
+    let lines: Vec<&str> = block.lines().collect();
+    let Some(end_idx) = lines.iter().rposition(|l| l.contains("-----END ")) else {
+        return block.trim_end().to_string();
+    };
+    let begin_line = lines.first().map(|l| l.trim_end()).unwrap_or_default();
+    let end_line = lines[end_idx].trim_end();
+
+    let mut headers = Vec::new();
+    let mut body = String::new();
+    let mut in_body = false;
+    for line in &lines[1..end_idx] {
+        let line = line.trim();
+        if !in_body {
+            if line.is_empty() {
+                if !headers.is_empty() {
+                    in_body = true;
+                }
+                continue;
+            }
+            if line.contains(':') {
+                headers.push(line.to_string());
+                continue;
+            }
+            in_body = true;
         }
-        None => block.trim_end().to_string(),
+        if line.is_empty() {
+            continue;
+        }
+        body.extend(line.chars().filter(|c| !c.is_whitespace()));
     }
+
+    let mut out = String::with_capacity(block.len() + 16);
+    out.push_str(begin_line);
+    out.push('\n');
+    for header in &headers {
+        out.push_str(header);
+        out.push('\n');
+    }
+    if !headers.is_empty() {
+        out.push('\n');
+    }
+    let mut col = 0usize;
+    for ch in body.chars() {
+        if col == 64 {
+            out.push('\n');
+            col = 0;
+        }
+        out.push(ch);
+        col += 1;
+    }
+    if col > 0 {
+        out.push('\n');
+    }
+    out.push_str(end_line);
+    out.push('\n');
+    out
 }
 
 /// Export an RSA public key as a PEM-encoded string (SPKI format).
@@ -203,4 +264,47 @@ fn expanduser(path: &Path) -> PathBuf {
         }
     }
     path.to_path_buf()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rewrap_pem(pem: &str, width: usize) -> String {
+        let lines: Vec<&str> = pem.lines().collect();
+        let begin = lines
+            .iter()
+            .find(|l| l.starts_with("-----BEGIN "))
+            .copied()
+            .unwrap();
+        let end = lines
+            .iter()
+            .find(|l| l.starts_with("-----END "))
+            .copied()
+            .unwrap();
+        let body: String = lines
+            .iter()
+            .filter(|l| !l.starts_with("-----"))
+            .flat_map(|l| l.chars())
+            .collect();
+        let mut wrapped = String::new();
+        for (i, ch) in body.chars().enumerate() {
+            if i > 0 && i % width == 0 {
+                wrapped.push('\n');
+            }
+            wrapped.push(ch);
+        }
+        format!("{begin}\n{wrapped}\n{end}\n")
+    }
+
+    #[test]
+    fn load_public_key_accepts_wide_base64_lines() {
+        let (_, public_key) = generate_rsa_keypair(2048).unwrap();
+        let pem = export_public_key_pem(&public_key).unwrap();
+        let wide = rewrap_pem(&pem, 72);
+        assert_ne!(wide, pem);
+
+        let loaded = load_public_key(&wide).unwrap();
+        assert_eq!(export_public_key_pem(&loaded).unwrap(), pem);
+    }
 }
