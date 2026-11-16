@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- Inbound RFC 9421 signature verification now accepts signatures that
+  bind the request target with `@target-uri` (or `@scheme`/`@request-target`)
+  instead of requiring the `@authority` + `@path` pair. Some senders —
+  e.g. tags.pub's activitypub-bot — sign the full target URI. Verification
+  tries both `https` and `http` schemes for these components since the
+  inbound handler cannot independently observe the request scheme.
+
 ## 0.6.18
 
 ### Fixed

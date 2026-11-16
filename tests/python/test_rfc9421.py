@@ -76,6 +76,7 @@ class TestSign:
             ["@method", "@authority", "@path", "content-digest"],
             [("created", 1618884473), ("keyid", "test-key-rsa-pss")],
             "post",
+            "https",
             "example.com",
             "/foo?param=value&pet=dog",
             {"content-digest": "sha-256=:X:"},
@@ -118,6 +119,24 @@ class TestSign:
         # @authority is not covered, so the required-component check rejects it
         with pytest.raises(SignatureVerificationError, match="@authority"):
             verify_request_rfc9421(public_key, sig, "GET", PATH, headers)
+
+    def test_target_uri_round_trip(self, rsa_keypair):
+        # tags.pub's activitypub-bot signs ("@method" "@target-uri" ...)
+        # instead of the @authority+@path pair.
+        private_key, public_key = rsa_keypair
+        headers = sign_request_rfc9421(
+            private_key,
+            KEY_ID,
+            "POST",
+            URL,
+            BODY,
+            signed_headers=["@method", "@target-uri", "content-digest"],
+        )
+        headers["Host"] = "remote.example"
+        sig = parse_signatures_rfc9421({k.lower(): v for k, v in headers.items()})[0]
+        assert (
+            verify_request_rfc9421(public_key, sig, "POST", PATH, headers, BODY) is True
+        )
 
 
 class TestVerify:

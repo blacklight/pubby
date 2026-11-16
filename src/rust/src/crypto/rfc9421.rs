@@ -59,8 +59,12 @@ const LABEL: &str = "sig1";
 /// when a body is sent.
 pub const DEFAULT_COMPONENTS: &[&str] = &["@method", "@authority", "@path"];
 
-/// Components every verified signature must cover.
-const REQUIRED_COMPONENTS: &[&str] = &["@method", "@authority", "@path"];
+/// Components every verified signature must cover: `@method` plus
+/// either `@target-uri` or the `@authority`+`@path` pair. Some
+/// implementations (e.g. tags.pub's activitypub-bot) sign the full
+/// target URI instead of the split components.
+const REQUIRED_METHOD: &str = "@method";
+const TARGET_URI_ALTERNATIVES: &[&str] = &["@authority", "@path"];
 
 /// A Structured Field bare item used in signature parameters.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -280,7 +284,8 @@ pub fn parse_signatures(headers: &HashMap<String, String>) -> Result<Vec<ParsedS
 /// Source of covered component values for one message.
 struct Message<'a> {
     method: &'a str,
-    authority: String,
+    scheme: &'a str,
+    authority: &'a str,
     path_and_query: &'a str,
     headers: &'a HashMap<String, String>,
 }
@@ -293,13 +298,29 @@ impl Message<'_> {
         };
         match name {
             "@method" => Ok(self.method.to_uppercase()),
-            "@authority" => Ok(self.authority.clone()),
+            "@scheme" => Ok(self.scheme.to_string()),
+            "@authority" => Ok(self.authority.to_string()),
             "@path" => Ok(if path.is_empty() {
                 "/".to_string()
             } else {
                 path.to_string()
             }),
             "@query" => Ok(format!("?{}", query.unwrap_or_default())),
+            "@request-target" => Ok(if self.path_and_query.is_empty() {
+                "/".to_string()
+            } else {
+                self.path_and_query.to_string()
+            }),
+            "@target-uri" => Ok(format!(
+                "{}://{}{}",
+                self.scheme,
+                self.authority,
+                if self.path_and_query.is_empty() {
+                    "/"
+                } else {
+                    self.path_and_query
+                }
+            )),
             n if n.starts_with('@') => Err(bad(format!("unsupported derived component {n}"))),
             n => header(self.headers, n)
                 .map(str::to_string)
@@ -425,7 +446,8 @@ fn sign_at(
         &params,
         &Message {
             method,
-            authority,
+            scheme: parsed.scheme(),
+            authority: &authority,
             path_and_query: &path_and_query,
             headers: &headers,
         },
@@ -488,10 +510,15 @@ fn verify_at(
             )));
         }
     }
-    for required in REQUIRED_COMPONENTS {
-        if !signature.components.iter().any(|c| c == required) {
-            return Err(bad(format!("signature does not cover {required}")));
-        }
+    if !signature.components.iter().any(|c| c == REQUIRED_METHOD) {
+        return Err(bad(format!("signature does not cover {REQUIRED_METHOD}")));
+    }
+    let covers = |name: &str| signature.components.iter().any(|c| c == name);
+    let target_bound = covers("@target-uri") || TARGET_URI_ALTERNATIVES.iter().all(|c| covers(c));
+    if !target_bound {
+        return Err(bad(
+            "signature does not cover @authority and @path or @target-uri",
+        ));
     }
 
     let created = signature
@@ -525,30 +552,53 @@ fn verify_at(
     let authority = header(headers, "host")
         .ok_or_else(|| bad("request has no Host header for @authority"))?
         .to_lowercase();
-    let base = signature_base(
-        &signature.components,
-        &signature.params,
-        &Message {
-            method,
-            authority,
-            path_and_query,
-            headers,
-        },
-    )?;
 
-    let verified = match public_key {
-        AnyPublicKey::Rsa(key) => {
-            let sig = rsa::pkcs1v15::Signature::try_from(signature.value.as_slice())
-                .map_err(|e| bad(format!("malformed signature: {e}")))?;
-            RsaVerifyingKey::<Sha256>::new(key.clone()).verify(base.as_bytes(), &sig)
-        }
-        AnyPublicKey::Ed25519(key) => {
-            let sig = ed25519_dalek::Signature::from_slice(&signature.value)
-                .map_err(|e| bad(format!("malformed signature: {e}")))?;
-            key.verify(base.as_bytes(), &sig)
-        }
+    // `@target-uri`/`@scheme` need the request scheme, which the verifier
+    // cannot observe — try https then http.
+    let needs_scheme = signature
+        .components
+        .iter()
+        .any(|c| c == "@target-uri" || c == "@scheme");
+    let schemes: &[&str] = if needs_scheme {
+        &["https", "http"]
+    } else {
+        &[""]
     };
-    verified.map_err(|e| bad(format!("Signature verification failed: {e}")))
+
+    let mut last_err = None;
+    for scheme in schemes {
+        let base = signature_base(
+            &signature.components,
+            &signature.params,
+            &Message {
+                method,
+                scheme,
+                authority: &authority,
+                path_and_query,
+                headers,
+            },
+        )?;
+        let verified = match public_key {
+            AnyPublicKey::Rsa(key) => {
+                let sig = rsa::pkcs1v15::Signature::try_from(signature.value.as_slice())
+                    .map_err(|e| bad(format!("malformed signature: {e}")))?;
+                RsaVerifyingKey::<Sha256>::new(key.clone())
+                    .verify(base.as_bytes(), &sig)
+                    .map_err(|e| bad(format!("Signature verification failed: {e}")))
+            }
+            AnyPublicKey::Ed25519(key) => {
+                let sig = ed25519_dalek::Signature::from_slice(&signature.value)
+                    .map_err(|e| bad(format!("malformed signature: {e}")))?;
+                key.verify(base.as_bytes(), &sig)
+                    .map_err(|e| bad(format!("Signature verification failed: {e}")))
+            }
+        };
+        match verified {
+            Ok(()) => return Ok(()),
+            Err(e) => last_err = Some(e),
+        }
+    }
+    Err(last_err.unwrap_or_else(|| bad("signature verification failed")))
 }
 
 #[cfg(test)]
@@ -618,6 +668,41 @@ MCowBQYDK2VwAyEAJrQLj5P/89iXES9+vFgrIy29clF9CC/oPPsw3c5D0bs=
             "POST",
             "/ap/users/bob/inbox?x=1",
             &received,
+            Some(BODY),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn verifies_signature_covering_target_uri() {
+        // tags.pub's activitypub-bot signs `("@method" "@target-uri" …)`
+        // instead of the @authority+@path pair.
+        let (private, public) = keypair();
+        let signed_headers = vec![
+            "@method".to_string(),
+            "@target-uri".to_string(),
+            "content-digest".to_string(),
+        ];
+        let mut headers = sign_request(
+            &private,
+            KEY_ID,
+            "POST",
+            URL,
+            Some(BODY),
+            &SignOptions {
+                signed_headers: Some(&signed_headers),
+                ..SignOptions::default()
+            },
+        )
+        .unwrap();
+        headers.insert("Host".into(), "remote.example".into());
+        let sig = &parse_signatures(&headers).unwrap()[0];
+        verify_request(
+            &public,
+            sig,
+            "POST",
+            "/ap/users/bob/inbox?x=1",
+            &headers,
             Some(BODY),
         )
         .unwrap();
@@ -807,7 +892,8 @@ MCowBQYDK2VwAyEAJrQLj5P/89iXES9+vFgrIy29clF9CC/oPPsw3c5D0bs=
             &params,
             &Message {
                 method: "post",
-                authority: "example.com".into(),
+                scheme: "https",
+                authority: "example.com",
                 path_and_query: "/foo?param=value&pet=dog",
                 headers: &headers,
             },
@@ -828,7 +914,8 @@ MCowBQYDK2VwAyEAJrQLj5P/89iXES9+vFgrIy29clF9CC/oPPsw3c5D0bs=
         let headers = HashMap::new();
         let message = |pq| Message {
             method: "GET",
-            authority: "example.com".into(),
+            scheme: "https",
+            authority: "example.com",
             path_and_query: pq,
             headers: &headers,
         };

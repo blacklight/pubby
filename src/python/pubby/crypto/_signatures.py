@@ -474,6 +474,7 @@ def parse_signatures_rfc9421(headers: dict[str, str]) -> list[ParsedSignature]:
 def _rfc9421_component(
     name: str,
     method: str,
+    scheme: str,
     authority: str,
     path_and_query: str,
     headers: dict[str, str],
@@ -481,12 +482,18 @@ def _rfc9421_component(
     path, _, query = path_and_query.partition("?")
     if name == "@method":
         return method.upper()
+    if name == "@scheme":
+        return scheme
     if name == "@authority":
         return authority
     if name == "@path":
         return path or "/"
     if name == "@query":
         return f"?{query}"
+    if name == "@request-target":
+        return path_and_query or "/"
+    if name == "@target-uri":
+        return f"{scheme}://{authority}{path_and_query or '/'}"
     if name.startswith("@"):
         raise SignatureVerificationError(f"unsupported derived component {name}")
     if name not in headers:
@@ -498,6 +505,7 @@ def _rfc9421_signature_base(
     components: list[str],
     params: list[tuple[str, "str | int"]],
     method: str,
+    scheme: str,
     authority: str,
     path_and_query: str,
     headers: dict[str, str],
@@ -505,7 +513,7 @@ def _rfc9421_signature_base(
     """Build the RFC 9421 §2.5 signature base from lowercased headers."""
     lines = [
         f"{_quote(c)}: "
-        + _rfc9421_component(c, method, authority, path_and_query, headers)
+        + _rfc9421_component(c, method, scheme, authority, path_and_query, headers)
         for c in components
     ]
     lines.append(
@@ -587,7 +595,7 @@ def sign_request_rfc9421(
     ]
     lower = {k.lower(): v for k, v in out.items()}
     base = _rfc9421_signature_base(
-        components, params, method, authority, path_and_query, lower
+        components, params, method, parsed.scheme, authority, path_and_query, lower
     )
     if isinstance(private_key, ed25519.Ed25519PrivateKey):
         signature = private_key.sign(base.encode("utf-8"))
@@ -640,9 +648,18 @@ def verify_request_rfc9421(
         raise SignatureVerificationError(
             f"algorithm {alg} does not match the signing key"
         )
-    for required in _RFC9421_REQUIRED_COMPONENTS:
-        if required not in signature.components:
-            raise SignatureVerificationError(f"signature does not cover {required}")
+    if "@method" not in signature.components:
+        raise SignatureVerificationError("signature does not cover @method")
+    # The target must be bound either by @target-uri or by the
+    # @authority+@path pair — some implementations (e.g. tags.pub's
+    # activitypub-bot) sign the full target URI instead.
+    target_bound = "@target-uri" in signature.components or (
+        "@authority" in signature.components and "@path" in signature.components
+    )
+    if not target_bound:
+        raise SignatureVerificationError(
+            "signature does not cover @authority and @path or @target-uri"
+        )
 
     now = int(time.time()) if now is None else now
     created = signature._int_param("created")
@@ -672,24 +689,38 @@ def verify_request_rfc9421(
     host = lower.get("host")
     if not host:
         raise SignatureVerificationError("request has no Host header for @authority")
-    base = _rfc9421_signature_base(
-        signature.components,
-        signature.params,
-        method,
-        host.strip().lower(),
-        path,
-        lower,
+
+    # @target-uri/@scheme need the request scheme, which the verifier
+    # cannot observe — try https then http.
+    needs_scheme = "@target-uri" in signature.components or (
+        "@scheme" in signature.components
     )
-    try:
-        if isinstance(public_key, ed25519.Ed25519PublicKey):
-            public_key.verify(signature.value, base.encode("utf-8"))
-        else:
-            public_key.verify(
-                signature.value,
-                base.encode("utf-8"),
-                padding.PKCS1v15(),
-                hashes.SHA256(),
-            )
-    except Exception as e:
-        raise SignatureVerificationError(f"Signature verification failed: {e}") from e
-    return True
+    schemes = ("https", "http") if needs_scheme else ("",)
+
+    last_err: Exception | None = None
+    for scheme in schemes:
+        base = _rfc9421_signature_base(
+            signature.components,
+            signature.params,
+            method,
+            scheme,
+            host.strip().lower(),
+            path,
+            lower,
+        )
+        try:
+            if isinstance(public_key, ed25519.Ed25519PublicKey):
+                public_key.verify(signature.value, base.encode("utf-8"))
+            else:
+                public_key.verify(
+                    signature.value,
+                    base.encode("utf-8"),
+                    padding.PKCS1v15(),
+                    hashes.SHA256(),
+                )
+            return True
+        except Exception as e:
+            last_err = e
+    raise SignatureVerificationError(
+        f"Signature verification failed: {last_err}"
+    ) from last_err
